@@ -1,5 +1,9 @@
 # Indiecorns
 
+[![npm version](https://img.shields.io/npm/v/indiecorns.svg)](https://www.npmjs.com/package/indiecorns)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![CI](https://github.com/danielsinewe/indiecorns-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/danielsinewe/indiecorns-cli/actions/workflows/ci.yml)
+
 Indiecorns is the CLI and agent plugin for Indiecorns onboarding. It helps
 developers sign in, inspect available onboarding tasks, run agent-safe action
 plans, and install the local Indiecorns plugin for Codex and compatible agent
@@ -132,22 +136,17 @@ From this repository root:
 ```bash
 npm install
 npm run cli -- help
-npm run cli -- doctor
+npm run smoke
+npm run pack:check
 ```
 
-The Next.js app lives in the nested `indiecorns/` workspace:
+This repository is the public CLI and agent plugin source. The hosted
+Indiecorns app and private operational code are maintained separately.
+
+Run the complete local check before publishing:
 
 ```bash
-npm --prefix indiecorns install
-npm --prefix indiecorns run dev
-npm --prefix indiecorns run typecheck
-npm --prefix indiecorns run build
-```
-
-Run the package check before publishing:
-
-```bash
-npm pack --dry-run
+npm test
 ```
 
 ## Package Contents

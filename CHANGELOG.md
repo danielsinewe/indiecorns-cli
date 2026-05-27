@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.18 - 2026-05-27
+
+- Make the public source repository self-contained by replacing private
+  monorepo proxy scripts with package-local CLI, smoke, and pack checks.
+- Add open-source maintenance docs and CI for install, smoke, and package
+  content verification.
+
 ## 0.3.17 - 2026-05-27
 
 - Point public npm metadata at the dedicated open-source CLI repository.

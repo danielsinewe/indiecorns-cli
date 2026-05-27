@@ -1,6 +1,6 @@
 {
 	"name": "indiecorns",
-	"version": "0.3.17",
+	"version": "0.3.18",
 	"description": "Indiecorns CLI and agent plugin for account sign-in, onboarding tasks, and local setup checks.",
 	"type": "module",
 	"homepage": "https://indiecorns.com",
@@ -41,20 +41,10 @@
 		"access": "public"
 	},
 	"scripts": {
-		"cli": "cd indiecorns && npm run cli --",
-		"dev": "cd indiecorns && npm run dev",
-		"build": "cd indiecorns && npm run build",
-		"start": "cd indiecorns && npm run start",
-		"typecheck": "cd indiecorns && npm run typecheck",
-		"extension:dev": "pnpm --dir chrome-extension dev",
-		"extension:build": "pnpm --dir chrome-extension build",
-		"extension:typecheck": "pnpm --dir chrome-extension type-check",
-		"extension:zip": "pnpm --dir chrome-extension zip",
-		"mobile:sync": "npm --prefix mobile run sync",
-		"mobile:android:debug": "npm --prefix mobile run build:android:debug",
-		"mobile:android:release": "npm --prefix mobile run build:android:release",
-		"mobile:ios:archive": "npm --prefix mobile run build:ios:archive",
-		"mobile:ios:export": "npm --prefix mobile run export:ios"
+		"cli": "node ./indiecorns/bin/indiecorns.mjs",
+		"smoke": "node ./indiecorns/bin/indiecorns.mjs help",
+		"pack:check": "npm pack --dry-run",
+		"test": "npm run smoke && npm run pack:check"
 	},
 	"packageManager": "npm@11.6.2",
 	"dependencies": {
