@@ -23,6 +23,7 @@ only the CLI, plugin assets, README, changelog, and license.
 
 ## Release Process
 
-Releases are published to npm as the `indiecorns` package. Once npm trusted
-publishing is enabled for this repository, releases should be published through
-the GitHub Actions workflow instead of local token-based publishing.
+Releases are published to npm as the `indiecorns` package. The GitHub Actions
+workflow publishes from tags. It currently supports the `NPM_TOKEN` repository
+secret as a fallback until npm trusted publishing is approved for this
+repository.

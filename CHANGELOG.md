@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.19 - 2026-05-27
+
+- Add the npm token fallback to the GitHub Actions publish workflow so releases
+  can run from the public repository while npm trusted publishing awaits account
+  2FA approval.
+
 ## 0.3.18 - 2026-05-27
 
 - Make the public source repository self-contained by replacing private
