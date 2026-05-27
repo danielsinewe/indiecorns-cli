@@ -1,0 +1,20 @@
+{
+  "name": "indiecorns",
+  "interface": {
+    "displayName": "indiecorns"
+  },
+  "plugins": [
+    {
+      "name": "indiecorns",
+      "source": {
+        "source": "local",
+        "path": "./plugins/indiecorns"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

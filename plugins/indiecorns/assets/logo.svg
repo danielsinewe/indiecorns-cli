@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" role="img" aria-label="Indiecorns">
+  <rect width="320" height="80" rx="18" fill="#111827"/>
+  <path d="M44 17 59 41H29L44 17Z" fill="#F97316"/>
+  <circle cx="44" cy="48" r="18" fill="#FFF7ED"/>
+  <circle cx="44" cy="48" r="9" fill="#F97316"/>
+  <text x="78" y="52" fill="#FFF7ED" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">Indiecorns</text>
+</svg>

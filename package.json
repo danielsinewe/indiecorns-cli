@@ -1,0 +1,63 @@
+{
+	"name": "indiecorns",
+	"version": "0.3.17",
+	"description": "Indiecorns CLI and agent plugin for account sign-in, onboarding tasks, and local setup checks.",
+	"type": "module",
+	"homepage": "https://indiecorns.com",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/danielsinewe/indiecorns-cli.git"
+	},
+	"bugs": {
+		"url": "https://github.com/danielsinewe/indiecorns-cli/issues"
+	},
+	"keywords": [
+		"indiecorns",
+		"cli",
+		"agent",
+		"codex",
+		"indie-hackers",
+		"onboarding"
+	],
+	"author": {
+		"name": "Daniel Sinewe",
+		"email": "hello@danielsinewe.com",
+		"url": "https://danielsinewe.com"
+	},
+	"bin": {
+		"indiecorns": "indiecorns/bin/indiecorns.mjs"
+	},
+	"files": [
+		"CHANGELOG.md",
+		"indiecorns/bin/indiecorns.mjs",
+		"plugins/indiecorns",
+		".agents/plugins/marketplace.json"
+	],
+	"license": "MIT",
+	"engines": {
+		"node": "^20.20.0 || >=22.22.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"cli": "cd indiecorns && npm run cli --",
+		"dev": "cd indiecorns && npm run dev",
+		"build": "cd indiecorns && npm run build",
+		"start": "cd indiecorns && npm run start",
+		"typecheck": "cd indiecorns && npm run typecheck",
+		"extension:dev": "pnpm --dir chrome-extension dev",
+		"extension:build": "pnpm --dir chrome-extension build",
+		"extension:typecheck": "pnpm --dir chrome-extension type-check",
+		"extension:zip": "pnpm --dir chrome-extension zip",
+		"mobile:sync": "npm --prefix mobile run sync",
+		"mobile:android:debug": "npm --prefix mobile run build:android:debug",
+		"mobile:android:release": "npm --prefix mobile run build:android:release",
+		"mobile:ios:archive": "npm --prefix mobile run build:ios:archive",
+		"mobile:ios:export": "npm --prefix mobile run export:ios"
+	},
+	"packageManager": "npm@11.6.2",
+	"dependencies": {
+		"posthog-node": "^5.35.0"
+	}
+}

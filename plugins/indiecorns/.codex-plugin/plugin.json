@@ -1,0 +1,47 @@
+{
+  "name": "indiecorns",
+  "version": "0.1.0",
+  "description": "Agent-ready Indiecorns workflows for CLI auth, onboarding tasks, and dashboard handoff.",
+  "author": {
+    "name": "Indiecorns",
+    "email": "hello@danielsinewe.com",
+    "url": "https://app.indiecorns.com"
+  },
+  "homepage": "https://app.indiecorns.com",
+  "repository": "https://github.com/danielsinewe/indiecorns",
+  "license": "UNLICENSED",
+  "keywords": [
+    "indiecorns",
+    "cli",
+    "agents",
+    "onboarding",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json",
+  "interface": {
+    "displayName": "Indiecorns",
+    "shortDescription": "Use Indiecorns CLI auth and onboarding from agent tools.",
+    "longDescription": "Provides agent instructions and scripts for using Indiecorns from Codex and similar coding agents. It exposes the Indiecorns CLI JSON plan, browser auth handoff, onboarding tasks, and dashboard URLs without requiring agents to scrape terminal prose.",
+    "developerName": "Indiecorns",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://app.indiecorns.com",
+    "privacyPolicyURL": "https://app.indiecorns.com/privacy",
+    "termsOfServiceURL": "https://app.indiecorns.com/terms",
+    "defaultPrompt": [
+      "Show my Indiecorns CLI action plan.",
+      "Help me sign in to Indiecorns from the CLI.",
+      "Run my Indiecorns onboarding tasks."
+    ],
+    "brandColor": "#F97316",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": []
+  }
+}
