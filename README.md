@@ -1,9 +1,5 @@
 # Indiecorns
 
-[![npm version](https://img.shields.io/npm/v/indiecorns.svg)](https://www.npmjs.com/package/indiecorns)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![CI](https://github.com/danielsinewe/indiecorns-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/danielsinewe/indiecorns-cli/actions/workflows/ci.yml)
-
 Indiecorns is the CLI and agent plugin for Indiecorns onboarding. It helps
 developers sign in, inspect available onboarding tasks, run agent-safe action
 plans, and install the local Indiecorns plugin for Codex and compatible agent
@@ -17,6 +13,10 @@ Run the CLI directly with npm:
 npx indiecorns
 ```
 
+The default command starts the CLI-first wizard: it analyzes the local
+environment, checks auth, checks the agent plugin, summarizes onboarding
+credits, and then routes the user to the next command.
+
 Or install it globally:
 
 ```bash
@@ -29,6 +29,7 @@ The package requires Node.js 20.20 or newer, or Node.js 22.22 or newer.
 ## Common Commands
 
 ```bash
+npx indiecorns wizard
 npx indiecorns login
 npx indiecorns signup
 npx indiecorns status
@@ -37,6 +38,9 @@ npx indiecorns run
 npx indiecorns dashboard
 npx indiecorns doctor
 ```
+
+The wizard follows the best setup-CLI pattern: one terminal session, clear
+progress, browser auth only when needed, and structured output for agents.
 
 `npx indiecorns login` opens the browser, waits for the Indiecorns app to finish
 Google sign-in, and confirms the local CLI session in the terminal. On a remote
@@ -49,6 +53,7 @@ Use the structured JSON interfaces when another agent is orchestrating the CLI:
 
 ```bash
 npx indiecorns agent
+npx indiecorns wizard --ndjson --no-open
 npx indiecorns tasks --agent
 npx indiecorns run --agent
 ```
@@ -56,6 +61,10 @@ npx indiecorns run --agent
 `agent` and `--agent` are stable machine-readable surfaces. They avoid browser
 opens and return the auth, dashboard, action, and next-command data an agent
 needs without parsing human terminal output.
+
+`wizard --ndjson` streams lifecycle events as newline-delimited JSON so Codex,
+Claude, Cursor, CI jobs, or a custom orchestrator can render progress and act on
+the next command without scraping the terminal UI.
 
 For JSON output without the full agent plan:
 
@@ -136,17 +145,22 @@ From this repository root:
 ```bash
 npm install
 npm run cli -- help
-npm run smoke
-npm run pack:check
+npm run cli -- doctor
 ```
 
-This repository is the public CLI and agent plugin source. The hosted
-Indiecorns app and private operational code are maintained separately.
-
-Run the complete local check before publishing:
+The Next.js app lives in the nested `indiecorns/` workspace:
 
 ```bash
-npm test
+npm --prefix indiecorns install
+npm --prefix indiecorns run dev
+npm --prefix indiecorns run typecheck
+npm --prefix indiecorns run build
+```
+
+Run the package check before publishing:
+
+```bash
+npm pack --dry-run
 ```
 
 ## Package Contents

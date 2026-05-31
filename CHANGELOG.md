@@ -1,17 +1,12 @@
 # Changelog
 
-## 0.3.19 - 2026-05-27
+## 0.3.21 - 2026-05-31
 
-- Add the npm token fallback to the GitHub Actions publish workflow so releases
-  can run from the public repository while npm trusted publishing awaits account
-  2FA approval.
-
-## 0.3.18 - 2026-05-27
-
-- Make the public source repository self-contained by replacing private
-  monorepo proxy scripts with package-local CLI, smoke, and pack checks.
-- Add open-source maintenance docs and CI for install, smoke, and package
-  content verification.
+- Make the human CLI flows warmer and more guided with an Indiecorns branded
+  terminal header, TTY spinner states, clearer wizard sections, and more helpful
+  login/task/run next steps.
+- Keep `--json`, `--agent`, and `wizard --ndjson` outputs machine-readable so
+  agents can continue orchestrating the CLI without parsing human terminal UI.
 
 ## 0.3.17 - 2026-05-27
 

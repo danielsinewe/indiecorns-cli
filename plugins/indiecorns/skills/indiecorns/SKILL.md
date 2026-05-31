@@ -14,6 +14,7 @@ Run the local checkout CLI when the current workspace is the Indiecorns repo:
 
 ```bash
 npm run cli -- agent
+npm run cli -- wizard --ndjson --no-open
 npm run cli -- login
 npm run cli -- tasks --agent
 npm run cli -- run --agent
@@ -30,6 +31,7 @@ Outside the repo, use the npm package:
 
 ```bash
 npx indiecorns agent
+npx indiecorns wizard --ndjson --no-open
 npx indiecorns login
 npx indiecorns tasks --agent
 npx indiecorns run --agent
@@ -44,6 +46,10 @@ npx indiecorns complete all
 
 `agent` and `--agent` are the stable machine-readable interfaces. Prefer them
 over parsing human CLI output.
+
+Use `wizard --ndjson --no-open` when an orchestrator wants setup progress as
+newline-delimited JSON events before deciding whether to log in, install the
+plugin, inspect tasks, or run onboarding actions.
 
 ## Authentication
 

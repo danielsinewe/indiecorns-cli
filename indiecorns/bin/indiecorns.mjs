@@ -34,59 +34,12 @@ const ONBOARDING_ACTIONS = [
     required: true,
   },
   {
-    id: "x",
-    aliases: ["twitter"],
-    title: "Follow us on X",
-    credits: 75,
-    url: "https://x.com/indiecornsX",
-    verification: "external_platform",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "linkedin",
-    aliases: ["li"],
-    title: "Follow us on LinkedIn",
-    credits: 75,
-    url: "https://www.linkedin.com/company/indiecorns",
-    verification: "external_platform",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "peerlist",
-    aliases: ["peers", "makers"],
-    title: "Follow Indiecorns users on Peerlist",
-    credits: 150,
-    url: "https://peerlist.io/danielsinewe/project/indiecorns",
-    verification: "external_platform",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
     id: "peerlist-upvote",
     aliases: ["upvote", "launch", "peerlist-launch"],
     title: "Upvote Indiecorns on Peerlist",
     credits: 100,
     url: "https://peerlist.io/danielsinewe/project/indiecorns",
     command: "npx indiecorns upvote peerlist",
-    verification: "external_platform",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "peerlist-rating",
-    aliases: ["rate", "rating", "peerlist-rate", "peerlist-rating"],
-    title: "Rate Indiecorns on Peerlist",
-    credits: 100,
-    url: "https://peerlist.io/danielsinewe/project/indiecorns",
-    command: "npx indiecorns rate peerlist",
-    verification: "external_platform",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "peerlist-invite",
-    aliases: ["invite", "join", "company", "peerlist-company"],
-    title: "Join the Indiecorns company on Peerlist",
-    credits: 100,
-    url: "https://peerlist.io/danielsinewe/signup",
-    command: "npx indiecorns join peerlist",
     verification: "external_platform",
     requires: [CLI_INSTALL_ACTION_ID],
   },
@@ -110,56 +63,6 @@ const ONBOARDING_ACTIONS = [
     verification: "profile_link",
     requires: [CLI_INSTALL_ACTION_ID],
   },
-  {
-    id: "external-profile-x",
-    aliases: ["twitter-profile", "x-profile", "profile-x"],
-    title: "Add your X profile",
-    credits: 50,
-    url: `${DEFAULT_APP_URL}/dashboard#social-links`,
-    command: "npx indiecorns profile set x --username <username>",
-    verification: "profile_link",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "external-profile-linkedin",
-    aliases: ["linkedin-profile", "profile-linkedin"],
-    title: "Add your LinkedIn profile",
-    credits: 50,
-    url: `${DEFAULT_APP_URL}/dashboard#social-links`,
-    command: "npx indiecorns profile set linkedin --username <username>",
-    verification: "profile_link",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "external-profile-github",
-    aliases: ["github-profile", "profile-github"],
-    title: "Add your GitHub profile",
-    credits: 50,
-    url: `${DEFAULT_APP_URL}/dashboard#social-links`,
-    command: "npx indiecorns profile set github --username <username>",
-    verification: "profile_link",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "external-profile-substack",
-    aliases: ["substack-profile", "profile-substack"],
-    title: "Add your Substack",
-    credits: 50,
-    url: `${DEFAULT_APP_URL}/dashboard#social-links`,
-    command: "npx indiecorns profile set substack --username <username>",
-    verification: "profile_link",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "external-profile-website",
-    aliases: ["website-profile", "profile-website"],
-    title: "Add your website",
-    credits: 50,
-    url: `${DEFAULT_APP_URL}/dashboard#social-links`,
-    command: "npx indiecorns profile set website --profile-url <url>",
-    verification: "profile_link",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
 ]
 
 const usage = `Indiecorns CLI
@@ -168,26 +71,24 @@ Usage:
   indiecorns [command] [options]
 
 Commands:
+  wizard                         Run the CLI-first Indiecorns setup wizard
+  collective                     Show the CLI-first collective command center
+  init                           Alias for wizard
   login                          Sign in to Indiecorns in your browser
   signup                         Create an Indiecorns account in your browser
   status                         Show CLI authentication status
   tasks                          Show onboarding tasks
-  follow <x|linkedin|peerlist|discord>
-                                 Open a task and earn onboarding credits
+  follow <discord>               Open a task and earn onboarding credits
   upvote peerlist                Open the Indiecorns Peerlist launch upvote
-  rate peerlist                  Open the Indiecorns Peerlist project rating
-  join peerlist                  Open the Indiecorns Peerlist company invite
   join discord                   Open the Indiecorns Discord invite
   record peerlist --target <u>   Record an external Peerlist follow event
   events                         Show recorded external action events
   profiles [--platform <name>]   Show known external profiles and follow targets
   profile show [platform]        Show your saved external profiles
-  profile set <platform> --username <u>
-                                 Save your external username for Indiecorns
-  profile set website --profile-url <url>
-                                 Save your website for Indiecorns
+  profile set peerlist --username <u>
+                                 Save your Peerlist username for Indiecorns
   run                            Run every pending onboarding task
-  complete <x|linkedin|peerlist|peerlist-upvote|peerlist-rating|peerlist-invite|discord|all>
+  complete <peerlist-upvote|discord|external-profile-peerlist|all>
                                  Mark an already-finished task as complete
   dashboard                      Open your Indiecorns dashboard
   agent                          Print a Codex-ready JSON action plan
@@ -201,6 +102,7 @@ Commands:
 Options:
   --json                         Print machine-readable JSON where supported
   --agent                        Print agent-safe JSON and never open a browser
+  --ndjson                       Stream wizard lifecycle events as NDJSON
   --app-url <url>                Override Indiecorns app URL
   --no-open                      Print auth URL without opening a browser
   --timeout <seconds>            Login wait timeout, default 180
@@ -220,15 +122,88 @@ const colors = {
   red: "\x1b[31m",
   yellow: "\x1b[33m",
   cyan: "\x1b[36m",
+  magenta: "\x1b[35m",
+  dim: "\x1b[2m",
+  bold: "\x1b[1m",
   reset: "\x1b[0m",
 }
 
 const color = (value, code) =>
-  process.stdout.isTTY ? `${code}${value}${colors.reset}` : value
+  process.stdout.isTTY && !process.env.NO_COLOR
+    ? `${code}${value}${colors.reset}`
+    : value
 
 const ok = (value) => color(value, colors.green)
 const warn = (value) => color(value, colors.yellow)
 const fail = (value) => color(value, colors.red)
+const dim = (value) => color(value, colors.dim)
+const bold = (value) => color(value, colors.bold)
+const brand = (value) => color(value, colors.magenta)
+const cliPretty = () => Boolean(process.stdout.isTTY && !process.env.CI)
+
+const INDIECORNS_LOGO = [
+  "   ___          __ _                         ",
+  "  / _ \\__ ___  / _(_)__ ___  _______  ___   ",
+  " / // / // / |/ // / -_) _ \\/ __/ _ \\/ _ \\  ",
+  "/____/\\_, /|___//_/\\__/_//_/\\__/\\___/_//_/  ",
+  "     /___/                                  ",
+]
+
+const printBrandHeader = (subtitle) => {
+  if (process.stdout.isTTY) {
+    console.log(brand(INDIECORNS_LOGO.join("\n")))
+  }
+  console.log(`${bold("Indiecorns")} ${subtitle}`)
+}
+
+const section = (title) => {
+  console.log("")
+  console.log(color(title, colors.cyan))
+}
+
+const createSpinner = (label) => {
+  if (!cliPretty()) {
+    console.log(label)
+    return {
+      update() {},
+      stop(finalLabel = label) {
+        console.log(finalLabel)
+      },
+    }
+  }
+
+  const frames = ["-", "\\", "|", "/"]
+  let frameIndex = 0
+  let currentLabel = label
+  process.stdout.write(`${frames[frameIndex]} ${currentLabel}`)
+  const timer = setInterval(() => {
+    frameIndex = (frameIndex + 1) % frames.length
+    process.stdout.write(`\r${frames[frameIndex]} ${currentLabel}`)
+  }, 90)
+
+  return {
+    update(nextLabel) {
+      currentLabel = nextLabel
+    },
+    stop(finalLabel = currentLabel) {
+      clearInterval(timer)
+      process.stdout.write(`\r${" ".repeat(currentLabel.length + 4)}\r`)
+      console.log(finalLabel)
+    },
+  }
+}
+
+const withSpinner = async (label, task, successLabel = label) => {
+  const spinner = createSpinner(label)
+  try {
+    const result = await task(spinner)
+    spinner.stop(successLabel)
+    return result
+  } catch (error) {
+    spinner.stop(fail(label))
+    throw error
+  }
+}
 
 const parseArgs = (argv) => {
   const args = []
@@ -291,6 +266,10 @@ const bundledMarketplacePath = resolve(
 
 const printJson = (value) => {
   console.log(JSON.stringify(value, null, 2))
+}
+
+const printNdjson = (value) => {
+  console.log(JSON.stringify({ v: 1, ts: new Date().toISOString(), ...value }))
 }
 
 const printRows = (rows) => {
@@ -784,30 +763,22 @@ const getAgentPlan = async (flags) => {
       verificationNote:
         action.kind === "command"
           ? "Running the authenticated CLI completes this action automatically."
-          : action.id === "peerlist"
-            ? "The CLI stores observed Peerlist follow evidence and can discover your Peerlist username from recorded events."
-            : action.id === "peerlist-upvote"
-              ? "The CLI opens and stores the launch upvote task. Actual upvote verification depends on the user's Peerlist session."
-              : action.id === "peerlist-rating"
-                ? "The CLI opens and stores the Peerlist project rating task. The extension can verify when the rating is submitted."
-                : action.id === "peerlist-invite"
-                  ? "The CLI opens and stores the Peerlist company invitation task. Actual acceptance verification depends on the user's Peerlist session."
-                  : action.id === "discord"
-                    ? "The CLI opens and stores the Discord invite task. Actual join verification depends on the user's Discord session."
-                    : "The CLI can open and persist this action. Actual follow verification depends on the external platform session.",
+          : action.id === "peerlist-upvote"
+            ? "The CLI opens and stores the launch upvote task. Actual upvote verification depends on the user's Peerlist session."
+            : action.id === "discord"
+              ? "The CLI opens and stores the Discord invite task. Actual join verification depends on the user's Discord session."
+              : action.id === "external-profile-peerlist"
+                ? "The CLI saves your Peerlist profile link for Indiecorns."
+                : "The CLI can open and persist this action. Actual verification depends on the external platform session.",
       aliases: action.aliases,
     })),
     nextCommands: [
       "npx indiecorns login --no-open",
       "npx indiecorns tasks --json",
       "npx indiecorns run --no-open --json",
-      "npx indiecorns follow x --no-open",
-      "npx indiecorns follow linkedin --no-open",
-      "npx indiecorns follow peerlist --no-open",
       "npx indiecorns upvote peerlist --no-open",
-      "npx indiecorns rate peerlist --no-open",
-      "npx indiecorns join peerlist --no-open",
       "npx indiecorns join discord --no-open",
+      "npx indiecorns profile set peerlist --username <username>",
       "npx indiecorns profiles --platform peerlist --json",
       "npx indiecorns dashboard --no-open",
     ],
@@ -836,6 +807,12 @@ const createCliSession = async (appUrl) => {
     headers: {
       "Content-Type": "application/json",
     },
+    body: JSON.stringify({
+      cliVersion: getCliVersion(),
+      nodeVersion: process.version,
+      platform: osPlatform(),
+      architecture: osArch(),
+    }),
   })
 
   if (!response.ok) {
@@ -1060,6 +1037,10 @@ const saveCompletedSession = ({ appUrl, session, id, secret }) => {
       appUrl,
       userEmail: session.userEmail,
       userId: session.userId,
+      cliVersion: session.cliVersion,
+      nodeVersion: session.nodeVersion,
+      platform: session.platform,
+      architecture: session.architecture,
       cliSessionId: id,
       cliSecret: secret,
     },
@@ -1122,7 +1103,11 @@ const runBrowserAuth = async (flags, mode = "login") => {
 
   let cliSession = null
   if (!flags.json) {
-    cliSession = await createCliSession(appUrl)
+    cliSession = await withSpinner(
+      "Preparing your Indiecorns sign-in link...",
+      () => createCliSession(appUrl),
+      ok("Sign-in link is ready.")
+    )
     authUrl.searchParams.set("cli_session", cliSession.id)
     authUrl.searchParams.set("cli_secret", cliSession.secret)
     writeConfig({
@@ -1146,49 +1131,67 @@ const runBrowserAuth = async (flags, mode = "login") => {
     return 0
   }
 
-  console.log(color(action, colors.cyan))
-  console.log(`Opening: ${authUrl.toString()}`)
+  printBrandHeader(
+    mode === "signup"
+      ? "will help you create your account."
+      : "will guide the browser sign-in."
+  )
+  section(action)
+  console.log(
+    "I will open Indiecorns, wait here, connect this terminal, and install the local agent plugin for you."
+  )
+  console.log(dim(`Secure browser URL: ${authUrl.toString()}`))
 
   if (flags.open === false || flags["no-open"]) {
+    console.log(`Open this URL when you are ready: ${authUrl.toString()}`)
     console.log(
-      `If the browser does not open, copy this URL: ${authUrl.toString()}`
-    )
-    console.log(
-      "After signing in, return to the CLI and run: npx indiecorns status"
+      "After signing in, come back here and run: npx indiecorns status"
     )
     return 0
   }
 
-  if (openUrl(authUrl.toString())) {
-    console.log(ok("Opened your browser."))
-    console.log(
-      `Waiting up to ${safeTimeoutSeconds} seconds for Indiecorns sign-in to finish...`
+  const browserOpened = await withSpinner(
+    "Opening Indiecorns in your browser...",
+    () => Promise.resolve(openUrl(authUrl.toString())),
+    ok("Browser opened. I am watching for the handoff.")
+  )
+
+  if (browserOpened) {
+    console.log(dim(`Waiting up to ${safeTimeoutSeconds} seconds.`))
+
+    const session = await withSpinner(
+      "Waiting for you to finish sign-in...",
+      () =>
+        waitForAppCliSession({
+          appUrl,
+          id: cliSession.id,
+          secret: cliSession.secret,
+          timeoutSeconds: safeTimeoutSeconds,
+        }),
+      ok("Indiecorns and this terminal are connected.")
     )
 
-    const session = await waitForAppCliSession({
-      appUrl,
-      id: cliSession.id,
-      secret: cliSession.secret,
-      timeoutSeconds: safeTimeoutSeconds,
-    })
-
     if (session.status === "completed") {
+      section("Ready")
       console.log(ok("Authenticated."))
       if (session.userEmail) {
         console.log(`User: ${session.userEmail}`)
       }
       if (session.pluginInstall?.installed) {
-        console.log(ok("Installed the Indiecorns agent plugin."))
+        console.log(ok("Agent plugin installed for local coding agents."))
       } else if (session.pluginInstall?.error) {
         console.log(
           warn(`Plugin install skipped: ${session.pluginInstall.error}`)
         )
       }
-      console.log("Next: npx indiecorns tasks")
+      console.log("")
+      console.log(`${bold("Next:")} npx indiecorns tasks`)
+      console.log(dim("Tip: agents can use npx indiecorns agent for JSON."))
       return 0
     }
 
-    console.log(warn("Still waiting for sign-in to complete."))
+    section("Still waiting")
+    console.log(warn("The browser sign-in has not finished yet."))
     console.log("Finish auth in the browser, then run: npx indiecorns status")
     return 1
   }
@@ -1214,10 +1217,11 @@ const runAuthStatus = async (flags) => {
       return 0
     }
 
-    console.log(color("Indiecorns auth", colors.cyan))
+    printBrandHeader("is connected with an environment token.")
+    section("Auth")
     console.log(ok("Authenticated with INDIECORNS_TOKEN."))
     if (pluginInstall.installed) {
-      console.log(ok("Installed the Indiecorns agent plugin."))
+      console.log(ok("Agent plugin installed for local coding agents."))
     }
     return 0
   }
@@ -1251,13 +1255,14 @@ const runAuthStatus = async (flags) => {
         return 0
       }
 
-      console.log(color("Indiecorns auth", colors.cyan))
+      printBrandHeader("is connected on this machine.")
+      section("Auth")
       console.log(ok("Browser sign-in completed for this machine."))
       if (session.userEmail) {
         console.log(`User: ${session.userEmail}`)
       }
       if (installResult.pluginInstall.installed) {
-        console.log(ok("Installed the Indiecorns agent plugin."))
+        console.log(ok("Agent plugin installed for local coding agents."))
       }
       return 0
     }
@@ -1275,8 +1280,10 @@ const runAuthStatus = async (flags) => {
         return 0
       }
 
-      console.log(color("Indiecorns auth", colors.cyan))
+      printBrandHeader("is waiting for browser sign-in.")
+      section("Auth")
       console.log(warn("Browser sign-in is still pending."))
+      console.log("Finish the browser step, then run: indiecorns status")
       return 0
     }
   }
@@ -1297,11 +1304,12 @@ const runAuthStatus = async (flags) => {
       return 0
     }
 
-    console.log(color("Indiecorns auth", colors.cyan))
+    printBrandHeader("is connected on this machine.")
+    section("Auth")
     console.log(ok("Browser sign-in completed for this machine."))
     console.log(`App: ${config.browserSession.appUrl}`)
     if (pluginInstall.installed) {
-      console.log(ok("Installed the Indiecorns agent plugin."))
+      console.log(ok("Agent plugin installed for local coding agents."))
     }
     return 0
   }
@@ -1317,9 +1325,15 @@ const runAuthStatus = async (flags) => {
     return 0
   }
 
-  console.log(color("Indiecorns auth", colors.cyan))
+  printBrandHeader("is ready to pair this terminal.")
+  section("Auth")
   console.log(warn("No local CLI session is connected yet."))
   console.log("Run: indiecorns login")
+  console.log(
+    dim(
+      "I will open the browser, wait for sign-in, and wire up the agent plugin."
+    )
+  )
   return 0
 }
 
@@ -1401,14 +1415,14 @@ const runTasks = async (flags) => {
     return 0
   }
 
-  console.log(color("Indiecorns onboarding tasks", colors.cyan))
+  printBrandHeader("found your next onboarding moves.")
+  section("Progress")
   console.log(
     `${completedTasks.length}/${taskOutputs.length} complete · ${creditsEarned}/${creditsAvailable} credits`
   )
 
   if (pendingTasks.length > 0) {
-    console.log("")
-    console.log(color(cliInstalled ? "Next" : "Required first", colors.cyan))
+    section(cliInstalled ? "Next Best Moves" : "Start Here")
     for (const action of pendingTasks) {
       if (!cliInstalled && action.id !== CLI_INSTALL_ACTION_ID) {
         continue
@@ -1418,22 +1432,20 @@ const runTasks = async (flags) => {
     }
     if (!cliInstalled) {
       console.log("")
-      console.log(
-        warn("The remaining actions unlock after the CLI is authenticated.")
-      )
+      console.log(warn("The rest unlock after this terminal is authenticated."))
+      console.log(dim("Login installs the local agent plugin automatically."))
     }
   }
 
   if (completedTasks.length > 0) {
-    console.log("")
-    console.log(color("Completed", colors.cyan))
+    section("Already Done")
     for (const action of completedTasks) {
       console.log(`${ok("done")} ${action.title} (+${action.credits} credits)`)
     }
   }
 
   console.log("")
-  console.log(`Run ${ok("indiecorns run")} to open every pending link task.`)
+  console.log(`Run ${ok("indiecorns run")} and I will walk the queue for you.`)
   console.log(
     `Run ${ok("indiecorns tasks --json")} for automation-friendly output.`
   )
@@ -1445,14 +1457,9 @@ const runFollow = async (flags, target) => {
 
   if (!action) {
     console.error(fail("Unknown follow task."))
-    console.error("Try: indiecorns follow x")
-    console.error("Or:  indiecorns follow linkedin")
-    console.error("Or:  indiecorns follow peerlist")
-    console.error("Or:  indiecorns upvote peerlist")
-    console.error("Or:  indiecorns rate peerlist")
-    console.error("Or:  indiecorns join peerlist")
+    console.error("Try: indiecorns upvote peerlist")
     console.error("Or:  indiecorns join discord")
-    console.error("Or:  indiecorns profile set x --username <username>")
+    console.error("Or:  indiecorns profile set peerlist --username <username>")
     return 1
   }
 
@@ -1488,10 +1495,15 @@ const runFollow = async (flags, target) => {
     return 0
   }
 
-  console.log(color(action.title, colors.cyan))
-  console.log(`Opening: ${action.url}`)
+  printBrandHeader("is opening this task for you.")
+  section(action.title)
   console.log(`Reward: +${action.credits} credits`)
-  const savedAction = await saveOnboardingActionToApp({ flags, action })
+  console.log(dim(action.url))
+  const savedAction = await withSpinner(
+    "Saving this action to your Indiecorns account...",
+    () => saveOnboardingActionToApp({ flags, action }),
+    ok("Task state saved.")
+  )
   if (savedAction?.saved) {
     console.log(ok("Saved this action to your Indiecorns account."))
   }
@@ -1504,7 +1516,7 @@ const runFollow = async (flags, target) => {
 
   if (openUrl(action.url)) {
     console.log(ok("Opened your browser."))
-    console.log("After following, return to Indiecorns to continue onboarding.")
+    console.log("After the external action is done, come back and keep going.")
     return 0
   }
 
@@ -1529,8 +1541,9 @@ const runAllOnboarding = async (flags) => {
       return 1
     }
 
-    console.log(color("Indiecorns onboarding run", colors.cyan))
-    console.log(warn("Install the CLI first."))
+    printBrandHeader("needs one sign-in before autopilot can run.")
+    section("Required First")
+    console.log(warn("Install and authenticate the CLI first."))
     console.log(`  ${ok(output.requiredCommand)}`)
     console.log(
       "Login will also install the local Indiecorns agent plugin automatically."
@@ -1600,7 +1613,8 @@ const runAllOnboarding = async (flags) => {
     return output.authenticated ? 0 : 1
   }
 
-  console.log(color("Indiecorns onboarding run", colors.cyan))
+  printBrandHeader("is walking your onboarding queue.")
+  section("Autopilot")
   if (!output.authenticated) {
     console.log(
       warn("No authenticated CLI session found. Run: indiecorns login")
@@ -1627,13 +1641,9 @@ const runComplete = async (flags, target) => {
 
   if (selectedActions.length === 0) {
     console.error(fail("Unknown task to complete."))
-    console.error("Try: indiecorns complete x")
-    console.error("Or:  indiecorns complete peerlist")
-    console.error("Or:  indiecorns complete peerlist-upvote")
-    console.error("Or:  indiecorns complete peerlist-rating")
-    console.error("Or:  indiecorns complete peerlist-invite")
+    console.error("Try: indiecorns complete peerlist-upvote")
     console.error("Or:  indiecorns complete discord")
-    console.error("Or:  indiecorns profile set github --username <username>")
+    console.error("Or:  indiecorns profile set peerlist --username <username>")
     console.error("Or:  indiecorns complete all")
     return 1
   }
@@ -1888,8 +1898,9 @@ const runDashboard = (flags) => {
     return 0
   }
 
-  console.log(color("Open Indiecorns dashboard", colors.cyan))
-  console.log(`Opening: ${dashboardUrl}`)
+  printBrandHeader("is opening your dashboard.")
+  section("Dashboard")
+  console.log(dim(dashboardUrl))
 
   if (flags.open === false || flags["no-open"]) {
     console.log(`If the browser does not open, copy this URL: ${dashboardUrl}`)
@@ -2031,38 +2042,15 @@ const runPluginInstall = (flags) => {
     return 0
   }
 
-  console.log(color("Indiecorns plugin installed", colors.cyan))
-  console.log(`${ok("Plugin:")} ${pluginRoot}`)
-  console.log(`${ok("Marketplace:")} ${marketplacePath}`)
+  printBrandHeader("installed the local agent plugin.")
+  section("Plugin")
+  console.log(`${ok("Plugin:")} ${result.pluginRoot}`)
+  console.log(`${ok("Marketplace:")} ${result.marketplacePath}`)
   console.log("Restart Codex so it reloads the local plugin marketplace.")
   return 0
 }
 
-const runOnboarding = (flags) => {
-  if (flags.json) {
-    printJson(getAgentPlan(flags))
-    return 0
-  }
-
-  if (!process.stdout.isTTY || flags["no-open"]) {
-    console.log(color("Welcome to Indiecorns", colors.cyan))
-    console.log("")
-    console.log("Start here:")
-    console.log(`  ${ok("indiecorns login")}     Sign in to your account`)
-    console.log("  indiecorns signup    Create an account")
-    console.log("  indiecorns tasks     Show onboarding tasks")
-    console.log("")
-    console.log("For CI or headless use, set INDIECORNS_TOKEN.")
-    return 0
-  }
-
-  console.log(color("Welcome to Indiecorns", colors.cyan))
-  console.log("Starting sign-in in your browser.")
-  console.log("")
-  return runBrowserAuth(flags, "login")
-}
-
-const runDoctor = (flags) => {
+const getDoctorReport = () => {
   const pkg = readPackage()
   const npmVersion = spawnSync("npm", ["--version"], { encoding: "utf8" })
   const nodeMajor = Number.parseInt(
@@ -2134,22 +2122,196 @@ const runDoctor = (flags) => {
     },
   ]
 
+  return { appRoot, packageName: pkg.name, rows }
+}
+
+const runDoctor = (flags) => {
+  const report = getDoctorReport()
+
   if (flags.json) {
-    printJson({ appRoot, packageName: pkg.name, rows })
-    return rows.some((row) => row.status === "fail") ? 1 : 0
+    printJson(report)
+    return report.rows.some((row) => row.status === "fail") ? 1 : 0
   }
 
-  console.log(color("Indiecorns doctor", colors.cyan))
-  console.log(`App root: ${appRoot}`)
-  printRows(rows)
-  return rows.some((row) => row.status === "fail") ? 1 : 0
+  printBrandHeader("checked this local app checkout.")
+  section("Doctor")
+  console.log(`App root: ${report.appRoot}`)
+  printRows(report.rows)
+  return report.rows.some((row) => row.status === "fail") ? 1 : 0
 }
+
+const getWizardReport = async (flags) => {
+  const appUrl = getAppUrl(flags)
+  const doctor = getDoctorReport()
+  const agentPlan = await getAgentPlan(flags)
+  const config = readConfig()
+  const pluginInstallPaths = getHomePluginInstallPaths()
+  const pluginInstalled = existsSync(pluginInstallPaths.pluginRoot)
+  const authenticated = hasToken() || hasBrowserSession()
+  const taskSummary = agentPlan.onboarding
+
+  return {
+    app: "indiecorns",
+    mode: "cli_first_collective",
+    appUrl,
+    authenticated,
+    authMethod: hasToken() ? "INDIECORNS_TOKEN" : "browser",
+    userEmail: config.browserSession?.userEmail,
+    doctor,
+    plugin: {
+      installed: pluginInstalled,
+      pluginRoot: pluginInstallPaths.pluginRoot,
+      marketplacePath: pluginInstallPaths.marketplacePath,
+      installCommand: "npx indiecorns plugin install",
+    },
+    onboarding: taskSummary,
+    commands: {
+      login: `npx indiecorns login --app-url ${appUrl}`,
+      tasks: `npx indiecorns tasks --app-url ${appUrl}`,
+      run: `npx indiecorns run --app-url ${appUrl}`,
+      agent: `npx indiecorns agent --app-url ${appUrl}`,
+      dashboard: `npx indiecorns dashboard --app-url ${appUrl}`,
+      pluginInstall: "npx indiecorns plugin install",
+    },
+    agentPlan,
+  }
+}
+
+const emitWizardNdjson = async (flags) => {
+  printNdjson({
+    type: "wizard.started",
+    app: "indiecorns",
+    mode: "cli_first_collective",
+  })
+
+  const report = await getWizardReport(flags)
+
+  printNdjson({
+    type: "wizard.step",
+    step: "analyze",
+    status: report.doctor.rows.some((row) => row.status === "fail")
+      ? "failed"
+      : "ok",
+    rows: report.doctor.rows,
+  })
+  printNdjson({
+    type: "wizard.step",
+    step: "auth",
+    status: report.authenticated ? "ok" : "action_required",
+    authenticated: report.authenticated,
+    command: report.commands.login,
+  })
+  printNdjson({
+    type: "wizard.step",
+    step: "plugin",
+    status: report.plugin.installed ? "ok" : "action_available",
+    installed: report.plugin.installed,
+    command: report.commands.pluginInstall,
+  })
+  printNdjson({
+    type: "wizard.step",
+    step: "onboarding",
+    status: report.onboarding.pending === 0 ? "ok" : "action_available",
+    summary: report.onboarding,
+  })
+  printNdjson({
+    type: "wizard.completed",
+    nextCommands: Object.values(report.commands),
+  })
+
+  return 0
+}
+
+const runWizard = async (flags) => {
+  if (flags.ndjson) {
+    return emitWizardNdjson(flags)
+  }
+
+  if (flags.json || flags.agent) {
+    const report = await getWizardReport(flags)
+    printJson(report)
+    return report.doctor.rows.some((row) => row.status === "fail") ? 1 : 0
+  }
+
+  const report = await withSpinner(
+    "Checking your app, auth, plugin, and onboarding state...",
+    () => getWizardReport(flags),
+    ok("Workspace scan complete.")
+  )
+
+  printBrandHeader(`Wizard v${getCliVersion()}`)
+  console.log(dim("Feedback: hello@indiecorns.com"))
+  section("Welcome")
+  console.log(
+    "I am your Indiecorns setup guide. I connect your account, install the local agent plugin, and hand your onboarding tasks to agents safely."
+  )
+  section("What I Checked")
+  console.log("  - Local project health")
+  console.log("  - CLI authentication")
+  console.log("  - Local agent plugin")
+  console.log("  - Live onboarding actions")
+  section("Status")
+  printRows(report.doctor.rows)
+  console.log(
+    `${report.authenticated ? ok("OK") : warn("WARN")} auth - ${
+      report.authenticated
+        ? (report.userEmail ?? report.authMethod)
+        : "not connected"
+    }`
+  )
+  console.log(
+    `${report.plugin.installed ? ok("OK") : warn("WARN")} agent plugin - ${
+      report.plugin.installed ? report.plugin.pluginRoot : "not installed yet"
+    }`
+  )
+  console.log(
+    `${ok("OK")} onboarding - ${report.onboarding.completed}/${report.onboarding.total} complete, ${report.onboarding.creditsEarned}/${report.onboarding.creditsAvailable} credits`
+  )
+  console.log("")
+
+  if (!report.authenticated) {
+    section("Next")
+    console.log(`  ${ok(report.commands.login)}`)
+    console.log("  Sign in once. I will install the local agent plugin too.")
+
+    if (process.stdout.isTTY && !flags["no-open"]) {
+      console.log("")
+      console.log("Starting browser sign-in now.")
+      return runBrowserAuth(flags, "login")
+    }
+
+    console.log("")
+    console.log("For agent or headless use:")
+    console.log(`  ${ok("npx indiecorns wizard --ndjson --no-open")}`)
+    return 0
+  }
+
+  section("Next")
+  if (!report.plugin.installed) {
+    console.log(`  ${ok(report.commands.pluginInstall)}`)
+  }
+  console.log(`  ${ok(report.commands.tasks)}`)
+  console.log(`  ${ok(report.commands.run)}`)
+  console.log(`  ${ok(report.commands.agent)}`)
+  console.log("")
+  console.log(
+    "Agents should use `indiecorns agent` or `indiecorns wizard --ndjson`."
+  )
+  return 0
+}
+
+const runOnboarding = async (flags) => runWizard(flags)
 
 const main = async () => {
   const { command, args, flags: parsedFlags } = parseArgs(process.argv.slice(2))
   const flags = applyAgentMode(parsedFlags)
 
   switch (command) {
+    case "wizard":
+    case "collective":
+    case "init":
+    case "setup":
+      return runWizard(flags)
     case "auth": {
       const subcommand = args[0] ?? "login"
       if (subcommand === "login") {
@@ -2195,29 +2357,15 @@ const main = async () => {
     }
     case "rate":
     case "rating": {
-      const target = args[0] ?? "peerlist"
-      if (
-        target === "peerlist" ||
-        target === "project" ||
-        target === "indiecorns"
-      ) {
-        return runFollow(flags, "peerlist-rating")
-      }
-      console.error(fail(`Unknown rating target: ${target}`))
-      console.error("Try: indiecorns rate peerlist")
+      console.error(fail("Peerlist rating is not part of the current setup."))
+      console.error("Try: indiecorns upvote peerlist")
+      console.error("Or:  indiecorns join discord")
       return 1
     }
     case "join":
     case "accept":
     case "invite": {
-      const target = args[0] ?? "peerlist"
-      if (
-        target === "peerlist" ||
-        target === "company" ||
-        target === "indiecorns"
-      ) {
-        return runFollow(flags, "peerlist-invite")
-      }
+      const target = args[0] ?? "discord"
       if (
         target === "discord" ||
         target === "server" ||
@@ -2226,8 +2374,7 @@ const main = async () => {
         return runFollow(flags, "discord")
       }
       console.error(fail(`Unknown invite target: ${target}`))
-      console.error("Try: indiecorns join peerlist")
-      console.error("Or:  indiecorns join discord")
+      console.error("Try: indiecorns join discord")
       return 1
     }
     case "run":
