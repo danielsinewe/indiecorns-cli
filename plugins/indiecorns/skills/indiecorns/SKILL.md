@@ -104,3 +104,36 @@ platform provides a token.
 
 Use those fields directly when orchestrating Codex, Cursor, Claude, OpenClaw,
 or other agent workflows.
+
+## CLI Release and Publishing
+
+When the user asks whether a CLI change is published, or says to publish,
+release, ship, or "always do it", do not stop at local edits. Verify and push
+the public npm release path.
+
+Use the public package repository as the npm source of truth:
+
+```bash
+gh repo clone danielsinewe/indiecorns-cli /tmp/indiecorns-cli-release
+```
+
+The private app monorepo can be useful for development and local app testing,
+but npm publishing should go through `danielsinewe/indiecorns-cli`. The private
+monorepo's publish workflow may fail with npm registry permission errors even
+when the public package workflow succeeds.
+
+Preserve these contracts during release work:
+
+- Keep `agent`, `--agent`, `--json`, and `wizard --ndjson --no-open`
+  machine-readable. Do not add human prose, spinners, or banners to those
+  outputs.
+- Use `node --check indiecorns/bin/indiecorns.mjs`, `npm test`, and
+  `npm pack --dry-run` in the public package repo before pushing a tag.
+- Publish by committing the package changes, tagging `v<version>`, pushing
+  `main`, then pushing the tag.
+- Verify completion with `npm view indiecorns version dist-tags --json` and
+  `npx -y indiecorns@latest help`.
+
+If local `npm publish` fails with `E401` or `E404`, treat that as an auth or npm
+permission boundary for the local token, then use the public GitHub Actions
+workflow before reporting a blocker.

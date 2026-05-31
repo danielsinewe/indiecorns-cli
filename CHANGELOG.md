@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.22 - 2026-05-31
+
+- Document the durable Indiecorns CLI release path inside the bundled plugin,
+  including the public `danielsinewe/indiecorns-cli` publishing source,
+  machine-readable CLI output guardrails, and npm verification commands.
+
 ## 0.3.21 - 2026-05-31
 
 - Make the human CLI flows warmer and more guided with an Indiecorns branded

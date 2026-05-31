@@ -60,3 +60,41 @@ The bundled MCP manifest also registers PostHog for the Indiecorns project:
 Interactive auth is browser-first. `indiecorns login` opens the browser and
 waits for the app to complete auth. Agent-safe commands use `--agent`, `--json`,
 or `--no-open`.
+
+## CLI Release Path
+
+Completed Indiecorns CLI or bundled-plugin changes should be published, not
+left only as local monorepo edits.
+
+The npm package source of truth is the public repository:
+
+```text
+https://github.com/danielsinewe/indiecorns-cli
+```
+
+The private Indiecorns monorepo may contain matching package files for local app
+development, but it is not the reliable npm publishing source. If a publish from
+the private monorepo fails with npm registry permission errors, move the release
+through `danielsinewe/indiecorns-cli` instead.
+
+Release checklist:
+
+```bash
+npm view indiecorns version dist-tags --json
+npm version <next-version> --no-git-tag-version
+node --check indiecorns/bin/indiecorns.mjs
+npm run cli -- wizard --json --no-telemetry --app-url http://localhost:3000
+npm run cli -- wizard --ndjson --no-open --no-telemetry --app-url http://localhost:3000
+npm test
+git commit -m "Release Indiecorns CLI <next-version>"
+git tag v<next-version>
+git push origin main
+git push origin v<next-version>
+```
+
+After the public repository publish workflow finishes, verify the real package:
+
+```bash
+npm view indiecorns version dist-tags --json
+npx -y indiecorns@latest help
+```
