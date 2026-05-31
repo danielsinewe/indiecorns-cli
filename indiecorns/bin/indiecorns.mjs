@@ -2097,22 +2097,28 @@ const getDoctorReport = () => {
       status: configuredPosthogKey === DEFAULT_POSTHOG_KEY ? "ok" : "warn",
       label: "PostHog project key",
       detail: configuredPosthogKey ? "configured for Indiecorns" : "missing",
+      audience: "developer",
     },
     {
       status:
         configuredPosthogHost === "https://eu.i.posthog.com" ? "ok" : "warn",
       label: "PostHog EU ingest host",
       detail: configuredPosthogHost ?? "missing",
+      audience: "developer",
     },
     {
       status: pluginPosthogUrl === POSTHOG_MCP_URL ? "ok" : "warn",
       label: "PostHog MCP project",
       detail: pluginPosthogUrl ?? "missing from plugin .mcp.json",
+      audience: "developer",
     },
   ]
 
   return { appRoot, packageName: pkg.name, rows }
 }
+
+const getUserVisibleDoctorRows = (rows) =>
+  rows.filter((row) => row.audience !== "developer")
 
 const runDoctor = (flags) => {
   const report = getDoctorReport()
@@ -2240,7 +2246,7 @@ const runWizard = async (flags) => {
   console.log("  - Local agent plugin")
   console.log("  - Live onboarding actions")
   section("Status")
-  printRows(report.doctor.rows)
+  printRows(getUserVisibleDoctorRows(report.doctor.rows))
   console.log(
     `${report.authenticated ? ok("OK") : warn("WARN")} auth - ${
       report.authenticated

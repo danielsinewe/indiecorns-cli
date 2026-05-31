@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.24 - 2026-05-31
+
+- Hide internal PostHog diagnostics from the default user-facing wizard output.
+  Developer checks remain available through `indiecorns doctor`.
+
 ## 0.3.23 - 2026-05-31
 
 - Replace the hard-to-read terminal ASCII banner with a compact Indiecorns logo
