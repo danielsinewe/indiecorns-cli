@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.25 - 2026-05-31
+
+- Send the current CLI version on authenticated app API requests so the
+  dashboard can refresh stale install-version evidence after users upgrade.
+
 ## 0.3.24 - 2026-05-31
 
 - Hide internal PostHog diagnostics from the default user-facing wizard output.

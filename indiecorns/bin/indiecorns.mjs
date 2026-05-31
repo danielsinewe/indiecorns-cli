@@ -673,6 +673,10 @@ const getCliAuthHeaders = () => {
   return {
     "x-indiecorns-cli-session": session.cliSessionId,
     "x-indiecorns-cli-secret": session.cliSecret,
+    "x-indiecorns-cli-version": getCliVersion(),
+    "x-indiecorns-node-version": process.version,
+    "x-indiecorns-platform": osPlatform(),
+    "x-indiecorns-architecture": osArch(),
   }
 }
 
