@@ -301,10 +301,6 @@ const hasBrowserSession = () =>
 const telemetryDisabledValues = new Set(["1", "true", "yes", "on"])
 
 const getCliVersion = () => {
-  if (process.env.npm_package_version) {
-    return process.env.npm_package_version
-  }
-
   const candidates = [
     resolve(__dirname, "..", "..", "package.json"),
     join(appRoot, "package.json"),

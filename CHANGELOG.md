@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.27 - 2026-05-31
+
+- Correct CLI version detection when `npx indiecorns` is launched from inside
+  another local `indiecorns` package checkout.
+
 ## 0.3.26 - 2026-05-31
 
 - Always send a CLI package version when creating browser login sessions, with
