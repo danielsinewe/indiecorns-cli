@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.26 - 2026-05-31
+
+- Always send a CLI package version when creating browser login sessions, with
+  a local fallback when the app response omits session metadata.
+
 ## 0.3.25 - 2026-05-31
 
 - Send the current CLI version on authenticated app API requests so the
