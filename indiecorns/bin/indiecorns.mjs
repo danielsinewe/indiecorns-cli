@@ -141,19 +141,8 @@ const bold = (value) => color(value, colors.bold)
 const brand = (value) => color(value, colors.magenta)
 const cliPretty = () => Boolean(process.stdout.isTTY && !process.env.CI)
 
-const INDIECORNS_LOGO = [
-  "   ___          __ _                         ",
-  "  / _ \\__ ___  / _(_)__ ___  _______  ___   ",
-  " / // / // / |/ // / -_) _ \\/ __/ _ \\/ _ \\  ",
-  "/____/\\_, /|___//_/\\__/_//_/\\__/\\___/_//_/  ",
-  "     /___/                                  ",
-]
-
 const printBrandHeader = (subtitle) => {
-  if (process.stdout.isTTY) {
-    console.log(brand(INDIECORNS_LOGO.join("\n")))
-  }
-  console.log(`${bold("Indiecorns")} ${subtitle}`)
+  console.log(`${brand("🦄")} ${bold("Indiecorns")} ${subtitle}`)
 }
 
 const section = (title) => {

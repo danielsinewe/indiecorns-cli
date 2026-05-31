@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.23 - 2026-05-31
+
+- Replace the hard-to-read terminal ASCII banner with a compact Indiecorns logo
+  mark that renders consistently in `npx indiecorns`.
+
 ## 0.3.22 - 2026-05-31
 
 - Document the durable Indiecorns CLI release path inside the bundled plugin,
