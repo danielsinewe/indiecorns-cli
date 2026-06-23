@@ -18,9 +18,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const DEFAULT_APP_URL = "https://app.indiecorns.com"
 const DEFAULT_POSTHOG_KEY = "phc_DkrgYsexPgXyGqsCm3nPP4wFT6GSQaxaLZzGx4RpABtV"
-const POSTHOG_PROJECT_ID = "183838"
-const POSTHOG_MCP_URL = `https://mcp.posthog.com/mcp?project_id=${POSTHOG_PROJECT_ID}`
 const CLI_INSTALL_ACTION_ID = "cli"
+const DEFAULT_EXTENSION_ID = "adohicablinejcgkglhedohifnieilbg"
+const enabledValues = new Set(["1", "true", "yes", "on"])
 const ONBOARDING_ACTIONS = [
   {
     id: CLI_INSTALL_ACTION_ID,
@@ -34,16 +34,6 @@ const ONBOARDING_ACTIONS = [
     required: true,
   },
   {
-    id: "peerlist-upvote",
-    aliases: ["upvote", "launch", "peerlist-launch"],
-    title: "Upvote Indiecorns on Peerlist",
-    credits: 100,
-    url: "https://peerlist.io/danielsinewe/project/indiecorns",
-    command: "npx indiecorns upvote peerlist",
-    verification: "external_platform",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
     id: "discord",
     aliases: ["server", "community", "discord-server"],
     title: "Join the Discord server",
@@ -51,16 +41,6 @@ const ONBOARDING_ACTIONS = [
     url: "https://discord.gg/JRwTZrTGy",
     command: "npx indiecorns join discord",
     verification: "external_platform",
-    requires: [CLI_INSTALL_ACTION_ID],
-  },
-  {
-    id: "external-profile-peerlist",
-    aliases: ["peerlist-profile", "profile-peerlist"],
-    title: "Add your Peerlist profile",
-    credits: 50,
-    url: `${DEFAULT_APP_URL}/dashboard#social-links`,
-    command: "npx indiecorns profile set peerlist --username <username>",
-    verification: "profile_link",
     requires: [CLI_INSTALL_ACTION_ID],
   },
 ]
@@ -79,7 +59,6 @@ Commands:
   status                         Show CLI authentication status
   tasks                          Show onboarding tasks
   follow <discord>               Open a task and earn onboarding credits
-  upvote peerlist                Open the Indiecorns Peerlist launch upvote
   join discord                   Open the Indiecorns Discord invite
   record peerlist --target <u>   Record an external Peerlist follow event
   events                         Show recorded external action events
@@ -88,15 +67,15 @@ Commands:
   profile set peerlist --username <u>
                                  Save your Peerlist username for Indiecorns
   run                            Run every pending onboarding task
-  complete <peerlist-upvote|discord|external-profile-peerlist|all>
+  complete <discord|all>
                                  Mark an already-finished task as complete
   dashboard                      Open your Indiecorns dashboard
+  extension open                 Open the Indiecorns Chrome extension executor
   agent                          Print a Codex-ready JSON action plan
   plugin install                 Install the Indiecorns Codex plugin locally
   telemetry status               Show CLI telemetry status
   telemetry disable              Disable CLI telemetry
   telemetry enable               Enable CLI telemetry
-  doctor                         Check a local Indiecorns app checkout
   help                           Show this help
 
 Options:
@@ -280,6 +259,16 @@ const getAppUrl = (flags) => {
   return rawUrl.replace(/\/+$/, "")
 }
 
+const getExtensionId = (flags = {}) =>
+  String(
+    flags["extension-id"] ??
+      process.env.INDIECORNS_CHROME_EXTENSION_ID ??
+      DEFAULT_EXTENSION_ID
+  ).trim()
+
+const getExtensionUrl = (flags = {}) =>
+  `chrome-extension://${getExtensionId(flags)}/side-panel/index.html`
+
 const readConfig = () => {
   try {
     return JSON.parse(readFileSync(configPath, "utf8"))
@@ -298,7 +287,6 @@ const writeConfig = (value) => {
 const hasToken = () => Boolean(process.env.INDIECORNS_TOKEN)
 const hasBrowserSession = () =>
   Boolean(readConfig().browserSession?.authenticatedAt)
-const telemetryDisabledValues = new Set(["1", "true", "yes", "on"])
 
 const getCliVersion = () => {
   const candidates = [
@@ -318,7 +306,7 @@ const getCliVersion = () => {
 }
 
 const isDisabledValue = (value) =>
-  telemetryDisabledValues.has(
+  enabledValues.has(
     String(value ?? "")
       .trim()
       .toLowerCase()
@@ -638,6 +626,10 @@ const getProfilePlatform = (action) =>
   isProfileAction(action) ? action.id.replace("external-profile-", "") : null
 
 const getActionCommand = (action, flags) => {
+  if (action.agentCommand) {
+    return action.agentCommand
+  }
+
   if (action.kind === "command") {
     return `${action.command} --app-url ${getAppUrl(flags)}`
   }
@@ -645,7 +637,11 @@ const getActionCommand = (action, flags) => {
   if (isProfileAction(action)) {
     const platform = getProfilePlatform(action)
     const valueFlag =
-      platform === "website" ? "--profile-url <url>" : "--username <username>"
+      platform === "linkedin"
+        ? "--profile-url https://www.linkedin.com/in/"
+        : platform === "website"
+          ? "--profile-url <url>"
+          : "--username <username>"
     return `npx indiecorns profile set ${platform} ${valueFlag} --app-url ${getAppUrl(flags)}`
   }
 
@@ -653,16 +649,96 @@ const getActionCommand = (action, flags) => {
     return `${action.command} --no-open --app-url ${getAppUrl(flags)}`
   }
 
+  if (action.id === "discord") {
+    return `npx indiecorns join discord --no-open --app-url ${getAppUrl(flags)}`
+  }
+
   return `npx indiecorns follow ${action.id} --no-open --app-url ${getAppUrl(flags)}`
 }
 
-const getCompleteCommand = (action, flags) =>
-  isProfileAction(action)
+const getCompleteCommand = (action, flags) => {
+  if (action.completeCommand) {
+    return action.completeCommand
+  }
+
+  return isProfileAction(action)
     ? getActionCommand(action, flags)
     : `npx indiecorns complete ${action.id} --app-url ${getAppUrl(flags)}`
+}
 
 const getRunCommand = (flags) =>
   `npx indiecorns run --app-url ${getAppUrl(flags)}`
+
+const getActionPlatform = (action) => {
+  if (action.platform) return action.platform
+  if (action.id === "x" || action.id === "external-profile-x") return "x"
+  if (action.id === "linkedin" || action.id === "external-profile-linkedin") {
+    return "linkedin"
+  }
+  if (action.id === "discord") return "discord"
+  if (action.id?.includes("peerlist")) return "peerlist"
+  if (action.id === "external-profile-github") return "github"
+  if (action.id === "external-profile-substack") return "substack"
+  if (action.id === "external-profile-website") return "website"
+  return "indiecorns"
+}
+
+const isManualAction = (action) => action.id?.endsWith("-comment")
+
+const getEvidenceRequired = (action) => {
+  if (action.evidenceRequired) return action.evidenceRequired
+  if (action.verification === "cli_session") return "completed CLI session"
+  if (action.verification === "profile_link") return "saved verified profile link"
+  if (isManualAction(action)) {
+    return "manual completion evidence from the target platform"
+  }
+  return "observed before/after platform state from browser assist"
+}
+
+const getBrowserAssist = (action) => {
+  if (action.browserAssist) return action.browserAssist
+  const targetUrl = action.targetUrl ?? action.url
+  if (
+    action.status === "completed" ||
+    action.kind === "command" ||
+    isProfileAction(action)
+  ) {
+    return {
+      required: false,
+      mode: "none",
+      instruction: "No browser assist is required for this action.",
+      targetUrl: null,
+    }
+  }
+  if (isManualAction(action)) {
+    return {
+      required: true,
+      mode: "manual_record",
+      instruction:
+        "Open the target page, complete the manual task, then record proof after the result is visible.",
+      targetUrl,
+    }
+  }
+  return {
+    required: true,
+    mode: "safe_click",
+    instruction:
+      "Use the Chrome extension or a signed-in browser to perform one clear safe action and record proof only after completion is observed.",
+    targetUrl,
+  }
+}
+
+const getAgentCapability = (action, authenticated) => {
+  if (action.agentCapability) return action.agentCapability
+  if (!authenticated && action.id !== CLI_INSTALL_ACTION_ID) return "blocked_auth"
+  if (action.kind === "command") return "cli_direct"
+  if (isProfileAction(action)) return "api_direct"
+  if (action.status === "needs_login" || action.status === "needs_platform_login") {
+    return "blocked_platform_login"
+  }
+  if (isManualAction(action)) return "manual_confirmation"
+  return "browser_assisted"
+}
 
 const getCliAuthHeaders = () => {
   const session = readConfig().browserSession
@@ -680,24 +756,91 @@ const getCliAuthHeaders = () => {
   }
 }
 
-const getAgentPlan = async (flags) => {
+const getAgentPlanFromApp = async (flags) => {
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return null
+  }
+
+  try {
+    const url = new URL(`${getAppUrl(flags)}/api/agent/plan`)
+    url.searchParams.set("source", flags.source ?? "cli_agent")
+
+    const response = await fetch(url, { headers })
+    if (!response.ok) {
+      return null
+    }
+
+    return response.json()
+  } catch {
+    return null
+  }
+}
+
+const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
   const appUrl = getAppUrl(flags)
+  const extensionId = getExtensionId(flags)
+  const extensionUrl =
+    plan?.desktopAutomation?.extensionUrl ?? getExtensionUrl(flags)
   const authenticated = hasToken() || hasBrowserSession()
-  const appActions = await getOnboardingActionsFromApp(flags)
-  const actions = appActions?.actions ?? ONBOARDING_ACTIONS
-  const taskOutputs = actions.map((action) => toTaskOutput(action, flags))
-  const completedCount = taskOutputs.filter(
+  const actions = plan?.actions ?? fallback.actions
+  const completedCount = actions.filter(
     (action) => action.status === "completed"
   ).length
-  const openedCount = taskOutputs.filter(
-    (action) => action.status === "opened"
-  ).length
-  const pendingCount = taskOutputs.filter(
+  const openedCount = actions.filter((action) => action.status === "opened").length
+  const pendingCount = actions.filter(
     (action) => action.status === "pending"
   ).length
+  const creditsEarned =
+    plan?.summary?.creditsEarned ??
+    actions
+      .filter((action) => action.status === "completed")
+      .reduce((total, action) => total + action.credits, 0)
+  const creditsAvailable =
+    plan?.summary?.creditsAvailable ??
+    actions.reduce((total, action) => total + action.credits, 0)
+  const remainingCommands = actions
+    .filter((action) => action.status !== "completed")
+    .map((action) => action.agentCommand ?? action.command)
+    .filter(Boolean)
+  const pendingCommands = actions
+    .filter((action) => action.status === "pending")
+    .map((action) => action.agentCommand ?? action.command)
+    .filter(Boolean)
+  const bootstrapNextAction = !authenticated
+    ? {
+        id: "login",
+        kind: "command",
+        title: "Sign in to Indiecorns",
+        description: "Connect this terminal to your Indiecorns account.",
+        credits: 0,
+        platform: "indiecorns",
+        status: "pending",
+        targetUrl: `${appUrl}/sign-in?source=cli`,
+        agentCommand: `npx indiecorns login --app-url ${appUrl}`,
+        completeCommand: "npx indiecorns status --json",
+        agentCapability: "blocked_auth",
+        browserAssist: {
+          required: false,
+          mode: "none",
+          instruction: "Run the login command to connect this terminal.",
+          targetUrl: null,
+        },
+        verification: "cli_session",
+        evidenceRequired: "completed CLI session",
+        safeToAutoComplete: false,
+        requires: [],
+        aliases: ["auth", "signin", "sign-in"],
+        lastObservation: {
+          observedAt: null,
+          count: 0,
+        },
+      }
+    : null
 
   return {
     app: "indiecorns",
+    mode: plan?.mode ?? "agent_first",
     agentReady: true,
     appUrl,
     auth: {
@@ -712,6 +855,9 @@ const getAgentPlan = async (flags) => {
     plugin: {
       name: "indiecorns",
       installed: existsSync(join(homedir(), "plugins", "indiecorns")),
+      skillsInstalled: existsSync(join(homedir(), ".agents", "skills", "indiecorns")),
+      skillsRoot: join(homedir(), ".agents", "skills"),
+      skills: ["indiecorns"],
       autoInstalledBy: "npx indiecorns login",
       installCommand: "npx indiecorns plugin install",
       requiredForAutopilot: true,
@@ -721,61 +867,113 @@ const getAgentPlan = async (flags) => {
       command: `npx indiecorns dashboard --no-open --app-url ${appUrl}`,
     },
     onboarding: {
-      liveStatusLoaded: Boolean(appActions?.actions),
-      total: taskOutputs.length,
-      completed: completedCount,
-      opened: openedCount,
-      pending: pendingCount,
-      creditsEarned: taskOutputs
-        .filter((action) => action.status === "completed")
-        .reduce((total, action) => total + action.credits, 0),
-      creditsAvailable: taskOutputs.reduce(
-        (total, action) => total + action.credits,
-        0
-      ),
-      pendingCommands: taskOutputs
-        .filter((action) => action.status === "pending")
-        .map((action) => action.command),
-      remainingCommands: taskOutputs
-        .filter((action) => action.status !== "completed")
-        .map((action) => action.command),
+      liveStatusLoaded: Boolean(plan),
+      total: plan?.summary?.total ?? actions.length,
+      completed: plan?.summary?.completed ?? completedCount,
+      opened: plan?.summary?.opened ?? openedCount,
+      pending: plan?.summary?.pending ?? pendingCount,
+      needsBrowserAssist:
+        plan?.summary?.needsBrowserAssist ??
+        actions.filter((action) => getBrowserAssist(action).required).length,
+      manualRequired:
+        plan?.summary?.manualRequired ??
+        actions.filter((action) => getBrowserAssist(action).mode === "manual_record")
+          .length,
+      creditsEarned,
+      creditsAvailable,
+      pendingCommands,
+      remainingCommands,
       requiredFirstActionId: CLI_INSTALL_ACTION_ID,
     },
-    actions: taskOutputs.map((action) => ({
+    readiness: plan?.readiness ?? {
+      cliSession: authenticated,
+      pluginRequired: true,
+      extensionUseful: actions.some((action) => getBrowserAssist(action).required),
+      blockedAuth: !authenticated,
+      blockedPlatformLogin: false,
+      nextCommand:
+        remainingCommands[0] ?? `npx indiecorns agent --app-url ${appUrl}`,
+    },
+    nextAction: plan?.nextAction ?? bootstrapNextAction,
+    desktopAutomation: plan?.desktopAutomation ?? {
+      available: actions.some((action) => getBrowserAssist(action).required),
+      extensionId,
+      extensionUrl,
+      openCommand: `npx indiecorns extension open --app-url ${appUrl}`,
+      runCommand: `npx indiecorns extension open --run-next --app-url ${appUrl}`,
+      nextActionId:
+        actions.find(
+          (action) =>
+            action.status !== "completed" && getBrowserAssist(action).required
+        )?.id ?? null,
+    },
+    actions: actions.map((action) => ({
       id: action.id,
       kind: action.kind,
       title: action.title,
+      description: action.description,
       credits: action.credits,
+      platform: getActionPlatform(action),
       status: action.status,
-      url: action.url,
-      command: action.command,
-      completeCommand: action.completeCommand,
+      url: action.targetUrl ?? action.url,
+      targetUrl: action.targetUrl ?? action.url,
+      command: action.agentCommand ?? action.command,
+      agentCommand: action.agentCommand ?? action.command,
+      completeCommand:
+        action.completeCommand ??
+        (action.id ? `npx indiecorns complete ${action.id} --app-url ${appUrl}` : undefined),
+      agentCapability: getAgentCapability(action, authenticated),
+      browserAssist: getBrowserAssist(action),
       verification: action.verification,
+      evidenceRequired: getEvidenceRequired(action),
+      safeToAutoComplete: getAgentCapability(action, authenticated) === "cli_direct",
       required: action.required,
-      requires: action.requires,
-      verificationNote:
-        action.kind === "command"
-          ? "Running the authenticated CLI completes this action automatically."
-          : action.id === "peerlist-upvote"
-            ? "The CLI opens and stores the launch upvote task. Actual upvote verification depends on the user's Peerlist session."
-            : action.id === "discord"
-              ? "The CLI opens and stores the Discord invite task. Actual join verification depends on the user's Discord session."
-              : action.id === "external-profile-peerlist"
-                ? "The CLI saves your Peerlist profile link for Indiecorns."
-                : "The CLI can open and persist this action. Actual verification depends on the external platform session.",
+      requires: action.requires ?? [],
+      targetProgress: action.targetProgress,
+      lastObservation: action.lastObservation ?? {
+        observedAt: action.lastObservationAt ?? null,
+        count: action.observationCount ?? 0,
+      },
       aliases: action.aliases,
     })),
-    nextCommands: [
+    nextCommands: plan?.nextCommands ?? [
       "npx indiecorns login --no-open",
-      "npx indiecorns tasks --json",
-      "npx indiecorns run --no-open --json",
-      "npx indiecorns upvote peerlist --no-open",
-      "npx indiecorns join discord --no-open",
-      "npx indiecorns profile set peerlist --username <username>",
-      "npx indiecorns profiles --platform peerlist --json",
+      "npx indiecorns tasks --agent",
+      "npx indiecorns run --agent",
+      "npx indiecorns extension open --run-next",
       "npx indiecorns dashboard --no-open",
     ],
   }
+}
+
+const getAgentPlan = async (flags) => {
+  const appUrl = getAppUrl(flags)
+  const appPlan = await getAgentPlanFromApp(flags)
+  const fallbackActions = (await getOnboardingActionsFromApp(flags))?.actions ?? ONBOARDING_ACTIONS
+  const fallbackTaskOutputs = fallbackActions.map((action) =>
+    toTaskOutput(action, flags)
+  )
+
+  await trackCliEvent(
+    appPlan ? "agent_plan_loaded" : "agent_plan_fallback",
+    {
+      source: flags.source ?? "cli_agent",
+      app_url: appUrl,
+      live_status_loaded: Boolean(appPlan),
+      total_actions: appPlan?.summary?.total ?? fallbackTaskOutputs.length,
+      completed_actions:
+        appPlan?.summary?.completed ??
+        fallbackTaskOutputs.filter((action) => action.status === "completed")
+          .length,
+    },
+    flags
+  )
+
+  return normalizeAgentPlanForCli({
+    plan: appPlan,
+    flags,
+    fallback: { actions: fallbackTaskOutputs },
+  })
 }
 
 const openUrl = (url) => {
@@ -793,6 +991,217 @@ const openUrl = (url) => {
 
 const sleep = (milliseconds) =>
   new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds))
+
+const urlLike = (value) =>
+  /^https?:\/\//i.test(String(value ?? "")) ||
+  /^[a-z0-9.-]+\.[a-z]{2,}/i.test(String(value ?? ""))
+
+const withProtocol = (value) =>
+  /^https?:\/\//i.test(value) ? value : `https://${value}`
+
+const safeUrl = (value) => {
+  try {
+    return new URL(withProtocol(String(value ?? "").trim()))
+  } catch {
+    return null
+  }
+}
+
+const profileUsernameFromUrl = (platform, value) => {
+  const url = safeUrl(value)
+  if (!url) {
+    return null
+  }
+
+  const host = url.hostname.replace(/^www\./, "").toLowerCase()
+  const segments = url.pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+  const first = segments[0]?.replace(/^@/, "")
+  const second = segments[1]?.replace(/^@/, "")
+
+  if (platform === "linkedin") {
+    if (host.endsWith("linkedin.com") && first === "in" && second) {
+      return second.toLowerCase().replace(/[^a-z0-9._-]/g, "") || null
+    }
+    return null
+  }
+  if (platform === "x") {
+    if ((host === "x.com" || host === "twitter.com") && first) {
+      return first.toLowerCase().replace(/[^a-z0-9._-]/g, "") || null
+    }
+    return null
+  }
+  if (platform === "peerlist") {
+    if (host === "peerlist.io" && first) {
+      return first.toLowerCase().replace(/[^a-z0-9._-]/g, "") || null
+    }
+    return null
+  }
+  if (platform === "github") {
+    if (host === "github.com" && first) {
+      return first.toLowerCase().replace(/[^a-z0-9._-]/g, "") || null
+    }
+    return null
+  }
+  if (platform === "substack") {
+    if (host.endsWith(".substack.com")) {
+      return host.replace(/\.substack\.com$/, "") || null
+    }
+    return null
+  }
+  if (first) {
+    return first.toLowerCase().replace(/[^a-z0-9._-]/g, "") || null
+  }
+
+  return null
+}
+
+const profileUrlNeedsBrowserResolution = (platform, value) => {
+  const url = safeUrl(value)
+  if (!url) {
+    return false
+  }
+
+  const host = url.hostname.replace(/^www\./, "").toLowerCase()
+  const segments = url.pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+
+  if (platform === "linkedin") {
+    return host.endsWith("linkedin.com") && segments[0] === "in" && !segments[1]
+  }
+  if (platform === "x") {
+    return (host === "x.com" || host === "twitter.com") && !segments[0]
+  }
+  if (platform === "peerlist") {
+    return host === "peerlist.io" && !segments[0]
+  }
+  if (platform === "github") {
+    return host === "github.com" && !segments[0]
+  }
+  return false
+}
+
+const isResolvedPlatformProfileUrl = (platform, value) =>
+  Boolean(profileUsernameFromUrl(platform, value)) &&
+  !profileUrlNeedsBrowserResolution(platform, value)
+
+const readBrowserUrlForApp = (appName) => {
+  if (process.platform !== "darwin") {
+    return null
+  }
+
+  const isSafari = appName === "Safari"
+  const script = isSafari
+    ? `tell application "${appName}"\nif not running then return ""\nif (count of windows) is 0 then return ""\nreturn URL of current tab of front window\nend tell`
+    : `tell application "${appName}"\nif not running then return ""\nif (count of windows) is 0 then return ""\nreturn URL of active tab of front window\nend tell`
+
+  const result = spawnSync("osascript", ["-e", script], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+  const url = result.stdout?.trim()
+  return urlLike(url) ? url : null
+}
+
+const readActiveBrowserUrl = (matches = null) => {
+  let fallbackUrl = null
+
+  for (const appName of [
+    "Google Chrome",
+    "Brave Browser",
+    "Microsoft Edge",
+    "Arc",
+    "Safari",
+  ]) {
+    const url = readBrowserUrlForApp(appName)
+    if (url) {
+      fallbackUrl ??= url
+      if (!matches || matches(url)) {
+        return url
+      }
+    }
+  }
+
+  return matches ? null : fallbackUrl
+}
+
+const resolveRedirectUrl = async (value) => {
+  const url = safeUrl(value)
+  if (!url) {
+    return null
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(3500),
+    })
+    return response.url && urlLike(response.url) ? response.url : null
+  } catch {
+    return null
+  }
+}
+
+const resolveProfileInput = async ({ flags, platform, username, profileUrl }) => {
+  const candidate = profileUrl ?? (urlLike(username) ? username : null)
+  let resolvedProfileUrl = candidate ? withProtocol(candidate) : profileUrl
+  let resolvedUsername = username && !urlLike(username) ? username : null
+  const resolution = {
+    input: candidate ?? username ?? null,
+    method: "direct",
+    openedBrowser: false,
+    finalUrl: resolvedProfileUrl ?? null,
+  }
+
+  if (candidate) {
+    const redirectUrl = await resolveRedirectUrl(candidate)
+    if (redirectUrl) {
+      resolvedProfileUrl = redirectUrl
+      resolution.method = "http_redirect"
+      resolution.finalUrl = redirectUrl
+    }
+
+    if (
+      profileUrlNeedsBrowserResolution(platform, resolvedProfileUrl) &&
+      flags.open !== false &&
+      !flags["no-open"] &&
+      !flags.json &&
+      !flags.agent
+    ) {
+      openUrl(resolvedProfileUrl)
+      resolution.openedBrowser = true
+      const resolveDelayMs = Number.parseInt(flags["resolve-delay"] ?? "5000", 10)
+      const deadline = Date.now() + (Number.isFinite(resolveDelayMs) ? resolveDelayMs : 5000)
+      while (Date.now() < deadline) {
+        const browserUrl = readActiveBrowserUrl(
+          (url) =>
+            isResolvedPlatformProfileUrl(platform, url) ||
+            profileUrlNeedsBrowserResolution(platform, url)
+        )
+        if (browserUrl && isResolvedPlatformProfileUrl(platform, browserUrl)) {
+          resolvedProfileUrl = browserUrl
+          resolution.method = "browser_redirect"
+          resolution.finalUrl = browserUrl
+          break
+        }
+        await sleep(500)
+      }
+    }
+
+    resolvedUsername = profileUsernameFromUrl(platform, resolvedProfileUrl)
+  }
+
+  return {
+    username: resolvedUsername,
+    profileUrl: resolvedProfileUrl,
+    resolution,
+  }
+}
 
 const createCliSession = async (appUrl) => {
   const response = await fetch(`${appUrl}/api/cli/sessions`, {
@@ -834,9 +1243,14 @@ const getOnboardingActionsFromApp = async (flags) => {
     return null
   }
 
-  const response = await fetch(`${getAppUrl(flags)}/api/onboarding/actions`, {
-    headers,
-  })
+  let response
+  try {
+    response = await fetch(`${getAppUrl(flags)}/api/onboarding/actions`, {
+      headers,
+    })
+  } catch {
+    return null
+  }
 
   if (!response.ok) {
     return null
@@ -925,12 +1339,38 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
     return null
   }
 
-  const username = flags.username ?? flags.user ?? flags.handle
-  const profileUrl = flags["profile-url"] ?? flags.url
+  const rawUsername = flags.username ?? flags.user ?? flags.handle
+  const rawProfileUrl = flags["profile-url"] ?? flags.url
+  const resolved = await resolveProfileInput({
+    flags,
+    platform,
+    username: rawUsername,
+    profileUrl: rawProfileUrl,
+  })
+  const username = resolved.username ?? rawUsername
+  const profileUrl = resolved.profileUrl ?? rawProfileUrl
   if (!username && !profileUrl) {
     return {
       saved: false,
       message: "Missing --username or --profile-url.",
+      resolution: resolved.resolution,
+    }
+  }
+
+  if (
+    profileUrl &&
+    profileUrlNeedsBrowserResolution(platform, profileUrl) &&
+    !username
+  ) {
+    return {
+      saved: false,
+      message:
+        platform === "linkedin"
+          ? resolved.resolution.openedBrowser
+            ? "Could not resolve the final LinkedIn profile URL. Make sure a desktop browser is signed in to LinkedIn and that https://www.linkedin.com/in/ forwards to your profile."
+            : "Could not resolve the final LinkedIn profile URL. Run without --json or --no-open on desktop so https://www.linkedin.com/in/ can forward to your profile."
+          : "Could not resolve the final profile URL. Run without --no-open on desktop, then retry after the browser reaches your profile.",
+      resolution: resolved.resolution,
     }
   }
 
@@ -947,7 +1387,11 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
         username,
         profileUrl,
         displayName: flags["display-name"],
-        source: flags.source ?? "cli",
+        source:
+          flags.source ??
+          (resolved.resolution.method === "browser_redirect"
+            ? "cli_browser_resolved"
+            : "cli"),
         confidence: flags.confidence ?? "user_verified",
       }),
     }
@@ -957,7 +1401,8 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
     return null
   }
 
-  return response.json()
+  const body = await response.json()
+  return { ...body, resolution: resolved.resolution }
 }
 
 const saveExternalActionEventToApp = async ({
@@ -1131,7 +1576,7 @@ const runBrowserAuth = async (flags, mode = "login") => {
   )
   section(action)
   console.log(
-    "I will open Indiecorns, wait here, connect this terminal, and install the local agent plugin for you."
+    "I will open Indiecorns, wait here, connect this terminal, and install the local agent plugin and skills for you."
   )
   console.log(dim(`Secure browser URL: ${authUrl.toString()}`))
 
@@ -1171,7 +1616,7 @@ const runBrowserAuth = async (flags, mode = "login") => {
         console.log(`User: ${session.userEmail}`)
       }
       if (session.pluginInstall?.installed) {
-        console.log(ok("Agent plugin installed for local coding agents."))
+        console.log(ok("Agent plugin and skills installed for local coding agents."))
       } else if (session.pluginInstall?.error) {
         console.log(
           warn(`Plugin install skipped: ${session.pluginInstall.error}`)
@@ -1214,7 +1659,7 @@ const runAuthStatus = async (flags) => {
     section("Auth")
     console.log(ok("Authenticated with INDIECORNS_TOKEN."))
     if (pluginInstall.installed) {
-      console.log(ok("Agent plugin installed for local coding agents."))
+      console.log(ok("Agent plugin and skills installed for local coding agents."))
     }
     return 0
   }
@@ -1255,7 +1700,7 @@ const runAuthStatus = async (flags) => {
         console.log(`User: ${session.userEmail}`)
       }
       if (installResult.pluginInstall.installed) {
-        console.log(ok("Agent plugin installed for local coding agents."))
+        console.log(ok("Agent plugin and skills installed for local coding agents."))
       }
       return 0
     }
@@ -1302,7 +1747,7 @@ const runAuthStatus = async (flags) => {
     console.log(ok("Browser sign-in completed for this machine."))
     console.log(`App: ${config.browserSession.appUrl}`)
     if (pluginInstall.installed) {
-      console.log(ok("Agent plugin installed for local coding agents."))
+      console.log(ok("Agent plugin and skills installed for local coding agents."))
     }
     return 0
   }
@@ -1333,11 +1778,22 @@ const runAuthStatus = async (flags) => {
 const findAction = (input) => {
   const normalized = String(input ?? "").toLowerCase()
   return ONBOARDING_ACTIONS.find(
-    (action) => action.id === normalized || action.aliases.includes(normalized)
+    (action) => action.id === normalized || action.aliases?.includes(normalized)
   )
 }
 
-const normalizeActionUrl = (action) => action.url ?? action.href
+const findAgentPlanAction = async (flags, input) => {
+  const normalized = String(input ?? "").toLowerCase()
+  const plan = await getAgentPlan(flags)
+  return plan.actions.find(
+    (action) =>
+      action.id === normalized ||
+      action.aliases?.includes(normalized) ||
+      action.platform === normalized
+  )
+}
+
+const normalizeActionUrl = (action) => action.targetUrl ?? action.url ?? action.href
 
 const toTaskOutput = (action, flags) => {
   const baseAction = findAction(action.id) ?? action
@@ -1367,9 +1823,12 @@ const toTaskOutput = (action, flags) => {
 }
 
 const runTasks = async (flags) => {
-  const appActions = await getOnboardingActionsFromApp(flags)
-  const actions = appActions?.actions ?? ONBOARDING_ACTIONS
-  const taskOutputs = actions.map((action) => toTaskOutput(action, flags))
+  const agentPlan = await getAgentPlan(flags)
+  const taskOutputs = agentPlan.actions.map((action) => ({
+    ...action,
+    command: action.agentCommand ?? action.command,
+    url: action.targetUrl ?? action.url,
+  }))
   const completedTasks = taskOutputs.filter(
     (action) => action.status === "completed"
   )
@@ -1391,18 +1850,32 @@ const runTasks = async (flags) => {
   if (flags.json) {
     printJson({
       authenticated: Boolean(getCliAuthHeaders()),
+      mode: "agent_first",
       automationCommand: getRunCommand(flags),
+      readiness: agentPlan.readiness,
       summary: {
         total: taskOutputs.length,
         completed: completedTasks.length,
         pending: pendingTasks.length,
+        needsBrowserAssist: agentPlan.onboarding.needsBrowserAssist ?? 0,
+        manualRequired: agentPlan.onboarding.manualRequired ?? 0,
         creditsEarned,
         creditsAvailable,
         requiredFirstActionId: CLI_INSTALL_ACTION_ID,
         readyForAutopilot: cliInstalled,
       },
+      desktopAutomation: agentPlan.desktopAutomation,
       tasks: taskOutputs,
       pendingCommands: pendingTasks.map((action) => action.command),
+      browserAssist: pendingTasks
+        .filter((action) => action.browserAssist?.required)
+        .map((action) => ({
+          actionId: action.id,
+          platform: action.platform,
+          mode: action.browserAssist.mode,
+          targetUrl: action.browserAssist.targetUrl,
+          evidenceRequired: action.evidenceRequired,
+        })),
       commands: taskOutputs.map((action) => action.command),
     })
     return 0
@@ -1423,10 +1896,16 @@ const runTasks = async (flags) => {
       console.log(`${ok(action.command.replace(/^npx /, ""))}`)
       console.log(`  ${action.title} (+${action.credits} credits)`)
     }
+    if (agentPlan.desktopAutomation?.available) {
+      console.log("")
+      console.log(
+        `Desktop automation: ${ok(agentPlan.desktopAutomation.runCommand.replace(/^npx /, ""))}`
+      )
+    }
     if (!cliInstalled) {
       console.log("")
       console.log(warn("The rest unlock after this terminal is authenticated."))
-      console.log(dim("Login installs the local agent plugin automatically."))
+      console.log(dim("Login installs the local agent plugin and skills automatically."))
     }
   }
 
@@ -1446,12 +1925,11 @@ const runTasks = async (flags) => {
 }
 
 const runFollow = async (flags, target) => {
-  const action = findAction(target)
+  const action = findAction(target) ?? (await findAgentPlanAction(flags, target))
 
   if (!action) {
     console.error(fail("Unknown follow task."))
-    console.error("Try: indiecorns upvote peerlist")
-    console.error("Or:  indiecorns join discord")
+    console.error("Try: indiecorns join discord")
     console.error("Or:  indiecorns profile set peerlist --username <username>")
     return 1
   }
@@ -1477,7 +1955,7 @@ const runFollow = async (flags, target) => {
       kind: "open_url",
       title: action.title,
       credits: action.credits,
-      url: action.url,
+      url: normalizeActionUrl(action),
       command: getActionCommand(action, flags),
       aliases: action.aliases,
       saved: Boolean(result?.saved),
@@ -1491,7 +1969,7 @@ const runFollow = async (flags, target) => {
   printBrandHeader("is opening this task for you.")
   section(action.title)
   console.log(`Reward: +${action.credits} credits`)
-  console.log(dim(action.url))
+  console.log(dim(normalizeActionUrl(action)))
   const savedAction = await withSpinner(
     "Saving this action to your Indiecorns account...",
     () => saveOnboardingActionToApp({ flags, action }),
@@ -1502,12 +1980,12 @@ const runFollow = async (flags, target) => {
   }
 
   if (flags.open === false || flags["no-open"]) {
-    console.log(`If the browser does not open, copy this URL: ${action.url}`)
+    console.log(`If the browser does not open, copy this URL: ${normalizeActionUrl(action)}`)
     console.log("After following, return to Indiecorns to continue onboarding.")
     return 0
   }
 
-  if (openUrl(action.url)) {
+  if (openUrl(normalizeActionUrl(action))) {
     console.log(ok("Opened your browser."))
     console.log("After the external action is done, come back and keep going.")
     return 0
@@ -1544,18 +2022,11 @@ const runAllOnboarding = async (flags) => {
     return 1
   }
 
-  const appActions = await getOnboardingActionsFromApp(flags)
-  const statusById = new Map(
-    (appActions?.actions ?? []).map((action) => [
-      action.id,
-      action.status ?? "pending",
-    ])
-  )
+  const agentPlan = await getAgentPlan(flags)
   const results = []
 
-  for (const action of ONBOARDING_ACTIONS) {
-    const currentStatus = statusById.get(action.id) ?? "pending"
-    if (currentStatus === "completed") {
+  for (const action of agentPlan.actions) {
+    if (action.status === "completed") {
       results.push({
         id: action.id,
         title: action.title,
@@ -1568,15 +2039,59 @@ const runAllOnboarding = async (flags) => {
       continue
     }
 
+    if (!action.safeToAutoComplete) {
+      results.push({
+        id: action.id,
+        title: action.title,
+        status:
+          action.agentCapability === "manual_confirmation"
+            ? "manual_required"
+            : action.browserAssist?.required
+              ? "browser_assist_required"
+              : "manual_required",
+        saved: false,
+        skipped: true,
+        url: action.targetUrl ?? action.url,
+        verification: action.verification,
+        agentCapability: action.agentCapability,
+        browserAssist: action.browserAssist,
+        evidenceRequired: action.evidenceRequired,
+        nextCommand: action.agentCommand ?? action.command,
+        desktopCommand: action.browserAssist?.required
+          ? `npx indiecorns extension open --run-next --app-url ${getAppUrl(flags)}`
+          : undefined,
+      })
+
+      await trackCliEvent(
+        action.browserAssist?.required
+          ? "agent_browser_assist_required"
+          : "agent_manual_required",
+        {
+          action_id: action.id,
+          platform: action.platform,
+          capability: action.agentCapability,
+          proof_type: action.evidenceRequired,
+        },
+        flags
+      )
+      continue
+    }
+
     const savedAction = await saveOnboardingActionToApp({
       flags,
-      action,
+      action: {
+        id: action.id,
+        title: action.title,
+        credits: action.credits,
+        href: action.targetUrl ?? action.url,
+        kind: action.kind,
+      },
       status: action.kind === "command" ? "completed" : "opened",
-      source: "agent",
+      source: "cli_agent",
     })
 
     if (action.kind !== "command" && !flags["no-open"] && !flags.agent) {
-      openUrl(action.url)
+      openUrl(action.targetUrl ?? action.url)
       await sleep(400)
     }
 
@@ -1586,10 +2101,10 @@ const runAllOnboarding = async (flags) => {
       status: savedAction?.action?.status ?? "opened",
       saved: Boolean(savedAction?.saved),
       skipped: false,
-      url: action.url,
+      url: action.targetUrl ?? action.url,
       verification: action.verification,
       verified: false,
-      nextCommand: getCompleteCommand(action, flags),
+      nextCommand: action.agentCommand ?? action.command,
     })
   }
 
@@ -1597,8 +2112,10 @@ const runAllOnboarding = async (flags) => {
     authenticated: Boolean(getCliAuthHeaders()),
     ran: results.length,
     results,
-    completeAllCommand: `npx indiecorns complete all --app-url ${getAppUrl(flags)}`,
-    note: "CLI install is completed automatically from an authenticated CLI session. External follow actions should be marked complete only after they were actually performed on the target platform.",
+    mode: "agent_first",
+    readiness: agentPlan.readiness,
+    desktopAutomation: agentPlan.desktopAutomation,
+    note: "Agent mode completes only CLI/API-safe actions. Browser-assisted and manual actions require observed proof before completion.",
   }
 
   if (flags.json) {
@@ -1634,8 +2151,7 @@ const runComplete = async (flags, target) => {
 
   if (selectedActions.length === 0) {
     console.error(fail("Unknown task to complete."))
-    console.error("Try: indiecorns complete peerlist-upvote")
-    console.error("Or:  indiecorns complete discord")
+    console.error("Try: indiecorns complete discord")
     console.error("Or:  indiecorns profile set peerlist --username <username>")
     console.error("Or:  indiecorns complete all")
     return 1
@@ -1856,6 +2372,7 @@ const runProfile = async (flags, args) => {
     saved: Boolean(savedProfile?.saved),
     profile: savedProfile?.profile,
     message: savedProfile?.message,
+    resolution: savedProfile?.resolution,
   }
 
   if (flags.json) {
@@ -1876,6 +2393,12 @@ const runProfile = async (flags, args) => {
   }
 
   console.log(ok(`Saved ${platform} username @${output.profile?.username}.`))
+  if (output.profile?.profileUrl) {
+    console.log(dim(output.profile.profileUrl))
+  }
+  if (output.resolution?.method && output.resolution.method !== "direct") {
+    console.log(dim(`Resolved via ${output.resolution.method}.`))
+  }
   return 0
 }
 
@@ -1911,6 +2434,53 @@ const runDashboard = (flags) => {
   return 0
 }
 
+const runExtensionOpen = async (flags) => {
+  const agentPlan = await getAgentPlan(flags)
+  const extensionUrl =
+    agentPlan.desktopAutomation?.extensionUrl ?? getExtensionUrl(flags)
+  const output = {
+    kind: "open_extension",
+    authenticated: Boolean(getCliAuthHeaders()),
+    extensionId: getExtensionId(flags),
+    extensionUrl,
+    runNext: Boolean(flags["run-next"]),
+    nextAction: agentPlan.actions.find(
+      (action) => action.id === agentPlan.desktopAutomation?.nextActionId
+    ) ?? agentPlan.nextAction ?? null,
+    note:
+      "The Indiecorns Chrome extension runs safe browser-assisted tasks and records proof after observed completion.",
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.authenticated ? 0 : 1
+  }
+
+  printBrandHeader("is opening the desktop automation extension.")
+  section("Chrome extension")
+  console.log(dim(extensionUrl))
+  if (output.nextAction) {
+    console.log(`${bold("Next:")} ${output.nextAction.title}`)
+  }
+  if (flags["run-next"]) {
+    console.log("Use the extension button: Run next task")
+  }
+
+  if (flags.open === false || flags["no-open"]) {
+    console.log(`Open this extension URL: ${extensionUrl}`)
+    return 0
+  }
+
+  if (openUrl(extensionUrl)) {
+    console.log(ok("Opened the Indiecorns extension."))
+    return 0
+  }
+
+  console.log(warn("I could not open the extension automatically."))
+  console.log(`Open this extension URL: ${extensionUrl}`)
+  return 0
+}
+
 const readJsonFile = (path, fallback) => {
   try {
     return JSON.parse(readFileSync(path, "utf8"))
@@ -1919,28 +2489,10 @@ const readJsonFile = (path, fallback) => {
   }
 }
 
-const readEnvFile = (path) => {
-  try {
-    return Object.fromEntries(
-      readFileSync(path, "utf8")
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith("#") && line.includes("="))
-        .map((line) => {
-          const index = line.indexOf("=")
-          const key = line.slice(0, index)
-          const value = line.slice(index + 1).replace(/^['"]|['"]$/g, "")
-          return [key, value]
-        })
-    )
-  } catch {
-    return {}
-  }
-}
-
 const getHomePluginInstallPaths = () => ({
   pluginRoot: join(homedir(), "plugins", "indiecorns"),
   marketplacePath: join(homedir(), ".agents", "plugins", "marketplace.json"),
+  skillsRoot: join(homedir(), ".agents", "skills"),
 })
 
 const getMarketplaceEntry = () => {
@@ -1995,6 +2547,50 @@ const installPluginMarketplaceEntry = (marketplacePath) => {
   )
 }
 
+const installBundledSkills = (skillsRoot) => {
+  const bundledSkillsRoot = join(bundledPluginRoot, "skills")
+
+  if (!existsSync(bundledSkillsRoot)) {
+    return {
+      installed: false,
+      error: "The Indiecorns skill bundle is missing from this package.",
+      skillsRoot,
+      skills: [],
+    }
+  }
+
+  const skillNames = ["indiecorns"]
+  const installedSkills = []
+  mkdirSync(skillsRoot, { recursive: true })
+
+  for (const skillName of skillNames) {
+    const source = join(bundledSkillsRoot, skillName)
+    const target = join(skillsRoot, skillName)
+
+    if (!existsSync(source)) {
+      return {
+        installed: false,
+        error: `The bundled ${skillName} skill is missing from this package.`,
+        skillsRoot,
+        skills: installedSkills,
+      }
+    }
+
+    rmSync(target, { recursive: true, force: true })
+    cpSync(source, target, { recursive: true })
+    installedSkills.push({
+      name: skillName,
+      path: target,
+    })
+  }
+
+  return {
+    installed: true,
+    skillsRoot,
+    skills: installedSkills,
+  }
+}
+
 const installPluginBundle = () => {
   if (!existsSync(bundledPluginRoot)) {
     return {
@@ -2003,16 +2599,22 @@ const installPluginBundle = () => {
     }
   }
 
-  const { pluginRoot, marketplacePath } = getHomePluginInstallPaths()
+  const { pluginRoot, marketplacePath, skillsRoot } = getHomePluginInstallPaths()
   rmSync(pluginRoot, { recursive: true, force: true })
   mkdirSync(dirname(pluginRoot), { recursive: true })
   cpSync(bundledPluginRoot, pluginRoot, { recursive: true })
   installPluginMarketplaceEntry(marketplacePath)
+  const skillInstall = installBundledSkills(skillsRoot)
 
   return {
     installed: true,
+    pluginInstalled: true,
+    skillsInstalled: skillInstall.installed,
     pluginRoot,
     marketplacePath,
+    skillsRoot: skillInstall.skillsRoot,
+    skills: skillInstall.skills,
+    skillInstall,
     nextStep: "Restart Codex so it reloads the local plugin marketplace.",
   }
 }
@@ -2039,32 +2641,22 @@ const runPluginInstall = (flags) => {
   section("Plugin")
   console.log(`${ok("Plugin:")} ${result.pluginRoot}`)
   console.log(`${ok("Marketplace:")} ${result.marketplacePath}`)
+  if (result.skillsInstalled) {
+    console.log(`${ok("Skills:")} ${result.skillsRoot}`)
+  } else if (result.skillInstall?.error) {
+    console.log(warn(`Skills skipped: ${result.skillInstall.error}`))
+  }
   console.log("Restart Codex so it reloads the local plugin marketplace.")
   return 0
 }
 
-const getDoctorReport = () => {
+const getSetupReport = () => {
   const pkg = readPackage()
   const npmVersion = spawnSync("npm", ["--version"], { encoding: "utf8" })
   const nodeMajor = Number.parseInt(
     process.versions.node.split(".")[0] ?? "0",
     10
   )
-  const localEnv = readEnvFile(join(appRoot, ".env.local"))
-  const vercelEnv = readEnvFile(join(appRoot, ".env.vercel.local"))
-  const configuredPosthogKey =
-    localEnv.NEXT_PUBLIC_POSTHOG_KEY ??
-    vercelEnv.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN ??
-    process.env.NEXT_PUBLIC_POSTHOG_KEY ??
-    process.env.INDIECORNS_POSTHOG_KEY
-  const configuredPosthogHost =
-    localEnv.NEXT_PUBLIC_POSTHOG_HOST ??
-    vercelEnv.NEXT_PUBLIC_POSTHOG_HOST ??
-    process.env.NEXT_PUBLIC_POSTHOG_HOST ??
-    process.env.INDIECORNS_POSTHOG_HOST
-  const pluginMcp = readJsonFile(join(bundledPluginRoot, ".mcp.json"), {})
-  const pluginPosthogUrl = pluginMcp.mcpServers?.posthog?.url
-
   const rows = [
     {
       status: nodeMajor >= 20 ? "ok" : "warn",
@@ -2097,55 +2689,20 @@ const getDoctorReport = () => {
       label: "dev script configured",
       detail: pkg.scripts?.dev ?? "missing",
     },
-    {
-      status: configuredPosthogKey === DEFAULT_POSTHOG_KEY ? "ok" : "warn",
-      label: "PostHog project key",
-      detail: configuredPosthogKey ? "configured for Indiecorns" : "missing",
-      audience: "developer",
-    },
-    {
-      status:
-        configuredPosthogHost === "https://eu.i.posthog.com" ? "ok" : "warn",
-      label: "PostHog EU ingest host",
-      detail: configuredPosthogHost ?? "missing",
-      audience: "developer",
-    },
-    {
-      status: pluginPosthogUrl === POSTHOG_MCP_URL ? "ok" : "warn",
-      label: "PostHog MCP project",
-      detail: pluginPosthogUrl ?? "missing from plugin .mcp.json",
-      audience: "developer",
-    },
   ]
 
   return { appRoot, packageName: pkg.name, rows }
 }
 
-const getUserVisibleDoctorRows = (rows) =>
-  rows.filter((row) => row.audience !== "developer")
-
-const runDoctor = (flags) => {
-  const report = getDoctorReport()
-
-  if (flags.json) {
-    printJson(report)
-    return report.rows.some((row) => row.status === "fail") ? 1 : 0
-  }
-
-  printBrandHeader("checked this local app checkout.")
-  section("Doctor")
-  console.log(`App root: ${report.appRoot}`)
-  printRows(report.rows)
-  return report.rows.some((row) => row.status === "fail") ? 1 : 0
-}
-
 const getWizardReport = async (flags) => {
   const appUrl = getAppUrl(flags)
-  const doctor = getDoctorReport()
+  const setup = getSetupReport()
   const agentPlan = await getAgentPlan(flags)
   const config = readConfig()
   const pluginInstallPaths = getHomePluginInstallPaths()
   const pluginInstalled = existsSync(pluginInstallPaths.pluginRoot)
+  const skillRoot = join(pluginInstallPaths.skillsRoot, "indiecorns")
+  const skillsInstalled = existsSync(skillRoot)
   const authenticated = hasToken() || hasBrowserSession()
   const taskSummary = agentPlan.onboarding
 
@@ -2156,11 +2713,14 @@ const getWizardReport = async (flags) => {
     authenticated,
     authMethod: hasToken() ? "INDIECORNS_TOKEN" : "browser",
     userEmail: config.browserSession?.userEmail,
-    doctor,
+    setup,
     plugin: {
       installed: pluginInstalled,
+      skillsInstalled,
       pluginRoot: pluginInstallPaths.pluginRoot,
       marketplacePath: pluginInstallPaths.marketplacePath,
+      skillsRoot: pluginInstallPaths.skillsRoot,
+      skills: skillsInstalled ? [{ name: "indiecorns", path: skillRoot }] : [],
       installCommand: "npx indiecorns plugin install",
     },
     onboarding: taskSummary,
@@ -2187,11 +2747,11 @@ const emitWizardNdjson = async (flags) => {
 
   printNdjson({
     type: "wizard.step",
-    step: "analyze",
-    status: report.doctor.rows.some((row) => row.status === "fail")
+    step: "setup",
+    status: report.setup.rows.some((row) => row.status === "fail")
       ? "failed"
       : "ok",
-    rows: report.doctor.rows,
+    rows: report.setup.rows,
   })
   printNdjson({
     type: "wizard.step",
@@ -2229,49 +2789,46 @@ const runWizard = async (flags) => {
   if (flags.json || flags.agent) {
     const report = await getWizardReport(flags)
     printJson(report)
-    return report.doctor.rows.some((row) => row.status === "fail") ? 1 : 0
+    return report.setup.rows.some((row) => row.status === "fail") ? 1 : 0
   }
 
   const report = await withSpinner(
-    "Checking your app, auth, plugin, and onboarding state...",
+    "Checking your Indiecorns setup...",
     () => getWizardReport(flags),
-    ok("Workspace scan complete.")
+    ok("Setup check complete.")
   )
 
-  printBrandHeader(`Wizard v${getCliVersion()}`)
-  console.log(dim("Feedback: hello@indiecorns.com"))
-  section("Welcome")
+  printBrandHeader(`setup v${getCliVersion()}`)
+  section("Your setup")
   console.log(
-    "I am your Indiecorns setup guide. I connect your account, install the local agent plugin, and hand your onboarding tasks to agents safely."
-  )
-  section("What I Checked")
-  console.log("  - Local project health")
-  console.log("  - CLI authentication")
-  console.log("  - Local agent plugin")
-  console.log("  - Live onboarding actions")
-  section("Status")
-  printRows(getUserVisibleDoctorRows(report.doctor.rows))
-  console.log(
-    `${report.authenticated ? ok("OK") : warn("WARN")} auth - ${
+    `${report.authenticated ? ok("Connected") : warn("Not connected")} ${
       report.authenticated
-        ? (report.userEmail ?? report.authMethod)
-        : "not connected"
+        ? `as ${report.userEmail ?? report.authMethod}`
+        : "to Indiecorns"
     }`
   )
   console.log(
-    `${report.plugin.installed ? ok("OK") : warn("WARN")} agent plugin - ${
-      report.plugin.installed ? report.plugin.pluginRoot : "not installed yet"
+    `${report.plugin.installed ? ok("Plugin installed") : warn("Plugin missing")} ${
+      report.plugin.installed
+        ? "for this coding agent"
+        : "so agents can read Indiecorns tasks"
     }`
   )
   console.log(
-    `${ok("OK")} onboarding - ${report.onboarding.completed}/${report.onboarding.total} complete, ${report.onboarding.creditsEarned}/${report.onboarding.creditsAvailable} credits`
+    `${ok("Progress")} ${report.onboarding.completed}/${report.onboarding.total} actions done, ${report.onboarding.creditsEarned}/${report.onboarding.creditsAvailable} credits earned`
   )
-  console.log("")
+
+  const setupIssues = report.setup.rows.filter((row) => row.status !== "ok")
+
+  if (setupIssues.length > 0) {
+    section("Needs attention")
+    printRows(setupIssues)
+  }
 
   if (!report.authenticated) {
-    section("Next")
+    section("Next step")
     console.log(`  ${ok(report.commands.login)}`)
-    console.log("  Sign in once. I will install the local agent plugin too.")
+    console.log("  Sign in once to connect this CLI to your Indiecorns account.")
 
     if (process.stdout.isTTY && !flags["no-open"]) {
       console.log("")
@@ -2280,22 +2837,33 @@ const runWizard = async (flags) => {
     }
 
     console.log("")
-    console.log("For agent or headless use:")
+    console.log("For automation:")
     console.log(`  ${ok("npx indiecorns wizard --ndjson --no-open")}`)
     return 0
   }
 
-  section("Next")
-  if (!report.plugin.installed) {
+  if (!report.plugin.installed || !report.plugin.skillsInstalled) {
+    section("Next step")
     console.log(`  ${ok(report.commands.pluginInstall)}`)
+    console.log("  Install the local plugin and skill so agents can use Indiecorns.")
+    return 0
   }
-  console.log(`  ${ok(report.commands.tasks)}`)
-  console.log(`  ${ok(report.commands.run)}`)
-  console.log(`  ${ok(report.commands.agent)}`)
-  console.log("")
-  console.log(
-    "Agents should use `indiecorns agent` or `indiecorns wizard --ndjson`."
-  )
+
+  section("Next step")
+  if (report.onboarding.pending > 0) {
+    console.log(`  ${ok(report.commands.tasks)}`)
+    console.log(
+      `  You have ${report.onboarding.pending} onboarding action${
+        report.onboarding.pending === 1 ? "" : "s"
+      } left. This shows what to do next.`
+    )
+    console.log("")
+    console.log(`To let the CLI open each task for you, run:`)
+    console.log(`  ${dim(report.commands.run)}`)
+  } else {
+    console.log(`  ${ok(report.commands.dashboard)}`)
+    console.log("  All onboarding actions are complete.")
+  }
   return 0
 }
 
@@ -2341,24 +2909,22 @@ const main = async () => {
       return runTasks(flags)
     case "follow":
       return runFollow(flags, args[0])
-    case "upvote": {
+    case "rate":
+    case "rating": {
       const target = args[0] ?? "peerlist"
       if (
         target === "peerlist" ||
         target === "launch" ||
         target === "indiecorns"
       ) {
-        return runFollow(flags, "peerlist-upvote")
+        return runFollow(flags, "peerlist-rating")
       }
-      console.error(fail(`Unknown upvote target: ${target}`))
-      console.error("Try: indiecorns upvote peerlist")
-      return 1
-    }
-    case "rate":
-    case "rating": {
-      console.error(fail("Peerlist rating is not part of the current setup."))
-      console.error("Try: indiecorns upvote peerlist")
-      console.error("Or:  indiecorns join discord")
+      if (target === "worktracks" || target === "worktracks-v2") {
+        return runFollow(flags, "worktracks-peerlist-rating")
+      }
+      console.error(fail(`Unknown rating target: ${target}`))
+      console.error("Try: indiecorns rate peerlist")
+      console.error("Or:  indiecorns rate worktracks")
       return 1
     }
     case "join":
@@ -2372,8 +2938,16 @@ const main = async () => {
       ) {
         return runFollow(flags, "discord")
       }
+      if (
+        target === "peerlist" ||
+        target === "company" ||
+        target === "peerlist-company"
+      ) {
+        return runFollow(flags, "peerlist-invite")
+      }
       console.error(fail(`Unknown invite target: ${target}`))
       console.error("Try: indiecorns join discord")
+      console.error("Or:  indiecorns join peerlist")
       return 1
     }
     case "run":
@@ -2405,6 +2979,24 @@ const main = async () => {
       return runFollow(flags, "peerlist")
     case "dashboard":
       return runDashboard(flags)
+    case "extension":
+    case "ext":
+    case "desktop": {
+      const subcommand = args[0] ?? "open"
+      if (
+        subcommand === "open" ||
+        subcommand === "run" ||
+        subcommand === "next"
+      ) {
+        return runExtensionOpen({
+          ...flags,
+          "run-next": flags["run-next"] || subcommand !== "open",
+        })
+      }
+      console.error(fail(`Unknown extension command: ${subcommand}`))
+      console.error("Try: indiecorns extension open")
+      return 1
+    }
     case "plugin": {
       const subcommand = args[0] ?? "install"
       if (subcommand === "install" || subcommand === "add") {
@@ -2424,8 +3016,6 @@ const main = async () => {
       return 0
     case "start":
       return runOnboarding(flags)
-    case "doctor":
-      return runDoctor(flags)
     case "help":
     case "--help":
     case "-h":

@@ -1,12 +1,13 @@
 ---
 name: indiecorns
-description: Use Indiecorns from agent environments. Handles CLI auth, agent JSON discovery, onboarding tasks, dashboard handoff, and safe browser/login boundaries.
+description: Use Indiecorns as a product user from agent environments. Handles CLI login, agent JSON discovery, onboarding tasks, dashboard handoff, profile follow/upvote/join actions, and safe browser boundaries. Public user-facing skill.
 ---
 
-# Indiecorns Agent Workflow
+# Indiecorns User Workflow
 
-Use this skill when the user asks to use Indiecorns from Codex, Cursor, Claude,
-OpenClaw, or another coding agent.
+Use this skill when a user wants an agent to operate Indiecorns for their own
+account: sign in, inspect onboarding tasks, open the dashboard, follow profiles,
+upvote or join launches, and record completion.
 
 ## Preferred CLI Entry Points
 
@@ -60,9 +61,10 @@ npx indiecorns login
 ```
 
 The CLI should open the browser, wait for app auth to finish, then report
-`Authenticated.` in the terminal. A successful login also installs the local
-`indiecorns` agent plugin into the user's plugin marketplace so Codex can load
-the Indiecorns skill without a separate manual setup step. On remote machines or
+`Authenticated.` in the terminal. A successful login also installs the public
+`indiecorns` agent plugin into the user's plugin marketplace and the public
+`indiecorns` skill into `~/.agents/skills/indiecorns`, so Codex-compatible
+agents can load it without a separate manual setup step. On remote machines or
 non-browser contexts, use:
 
 ```bash
@@ -104,36 +106,3 @@ platform provides a token.
 
 Use those fields directly when orchestrating Codex, Cursor, Claude, OpenClaw,
 or other agent workflows.
-
-## CLI Release and Publishing
-
-When the user asks whether a CLI change is published, or says to publish,
-release, ship, or "always do it", do not stop at local edits. Verify and push
-the public npm release path.
-
-Use the public package repository as the npm source of truth:
-
-```bash
-gh repo clone danielsinewe/indiecorns-cli /tmp/indiecorns-cli-release
-```
-
-The private app monorepo can be useful for development and local app testing,
-but npm publishing should go through `danielsinewe/indiecorns-cli`. The private
-monorepo's publish workflow may fail with npm registry permission errors even
-when the public package workflow succeeds.
-
-Preserve these contracts during release work:
-
-- Keep `agent`, `--agent`, `--json`, and `wizard --ndjson --no-open`
-  machine-readable. Do not add human prose, spinners, or banners to those
-  outputs.
-- Use `node --check indiecorns/bin/indiecorns.mjs`, `npm test`, and
-  `npm pack --dry-run` in the public package repo before pushing a tag.
-- Publish by committing the package changes, tagging `v<version>`, pushing
-  `main`, then pushing the tag.
-- Verify completion with `npm view indiecorns version dist-tags --json` and
-  `npx -y indiecorns@latest help`.
-
-If local `npm publish` fails with `E401` or `E404`, treat that as an auth or npm
-permission boundary for the local token, then use the public GitHub Actions
-workflow before reporting a blocker.

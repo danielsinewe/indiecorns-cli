@@ -1,7 +1,7 @@
 {
 	"name": "indiecorns",
-	"version": "0.3.27",
-	"description": "Indiecorns CLI and agent plugin for account sign-in, onboarding tasks, and local setup checks.",
+	"version": "0.3.29",
+	"description": "Indiecorns CLI, public user skill, and agent plugin for account sign-in and onboarding tasks.",
 	"type": "module",
 	"homepage": "https://indiecorns.com",
 	"repository": {

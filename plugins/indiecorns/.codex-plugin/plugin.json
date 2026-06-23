@@ -8,8 +8,8 @@
     "url": "https://app.indiecorns.com"
   },
   "homepage": "https://app.indiecorns.com",
-  "repository": "https://github.com/danielsinewe/indiecorns",
-  "license": "UNLICENSED",
+  "repository": "https://github.com/danielsinewe/indiecorns-cli",
+  "license": "MIT",
   "keywords": [
     "indiecorns",
     "cli",
@@ -18,7 +18,6 @@
     "codex"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
   "apps": "./.app.json",
   "interface": {
     "displayName": "Indiecorns",

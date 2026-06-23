@@ -15,36 +15,16 @@ Preferred agent-safe commands:
 npm run cli -- agent
 npm run cli -- tasks --agent
 npm run cli -- login --no-open
+npm run cli -- run --agent
+npm run cli -- complete all
 ```
 
-PostHog MCP:
-
-- The Indiecorns PostHog project ID is `183838`.
-- The plugin MCP manifest wires `posthog` to
-  `https://mcp.posthog.com/mcp?project_id=183838`.
-- In Codex, verify the active PostHog project before analytics work:
-
-```text
-posthog:exec({ "command": "info project-get", "context": "Checking active PostHog project before querying Indiecorns analytics through MCP." })
-posthog:exec({ "command": "call project-get {\"id\":\"@current\"}", "context": "Confirming PostHog MCP targets the Indiecorns project before analytics or dashboard changes." })
-```
-
-CLI release handoff:
-
-- When CLI changes are complete, publish them instead of leaving them local.
-- Keep the human CLI playful, but keep `--json`, `--agent`, and `--ndjson`
-  outputs parseable.
-- The npm package is released from
-  `https://github.com/danielsinewe/indiecorns-cli`, not from the private app
-  monorepo.
-- If direct `npm publish` fails with `E401` or `E404`, use the public repo's
-  tag-triggered publish workflow and verify npm afterward.
-
-Useful verification commands:
+For installed public CLI runs:
 
 ```bash
-npm view indiecorns version dist-tags --json
-npm test
-npm pack --dry-run
-npx -y indiecorns@latest help
+npx indiecorns agent
+npx indiecorns tasks --agent
+npx indiecorns login --no-open
+npx indiecorns run --agent
+npx indiecorns complete all
 ```

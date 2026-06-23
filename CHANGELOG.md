@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.29 - 2026-06-23
+
+- Install the public `indiecorns` skill automatically when the CLI installs the
+  local agent plugin.
+- Keep the public plugin bundle user-facing by excluding internal developer
+  skills and MCP diagnostics from the published npm package.
+- Report skill installation state in the agent and wizard JSON outputs.
+
 ## 0.3.27 - 2026-05-31
 
 - Correct CLI version detection when `npx indiecorns` is launched from inside
