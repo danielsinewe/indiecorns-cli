@@ -19,6 +19,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_APP_URL = "https://app.indiecorns.com"
 const DEFAULT_POSTHOG_KEY = "phc_DkrgYsexPgXyGqsCm3nPP4wFT6GSQaxaLZzGx4RpABtV"
 const CLI_INSTALL_ACTION_ID = "cli"
+const QUICK_START_ACTION_IDS = [
+  CLI_INSTALL_ACTION_ID,
+  "external-profile-website",
+  "discord",
+]
 const DEFAULT_EXTENSION_ID = "adohicablinejcgkglhedohifnieilbg"
 const enabledValues = new Set(["1", "true", "yes", "on"])
 const ONBOARDING_ACTIONS = [
@@ -34,12 +39,32 @@ const ONBOARDING_ACTIONS = [
     required: true,
   },
   {
+    id: "external-profile-website",
+    aliases: ["website", "website-profile", "profile-website"],
+    title: "Add your website",
+    description: "Add the public URL where people can see what you are building.",
+    credits: 50,
+    url: `${DEFAULT_APP_URL}/dashboard#social-links`,
+    kind: "open_url",
+    command:
+      "npx indiecorns profile set website --profile-url https://your-site.com",
+    verification: "profile_link",
+    requires: [CLI_INSTALL_ACTION_ID],
+  },
+  {
     id: "discord",
-    aliases: ["server", "community", "discord-server"],
-    title: "Join the Discord server",
+    aliases: [
+      "server",
+      "community",
+      "slack",
+      "slack-workspace",
+      "discord",
+      "discord-server",
+    ],
+    title: "Join the Slack community",
     credits: 100,
-    url: "https://discord.gg/JRwTZrTGy",
-    command: "npx indiecorns join discord",
+    url: "https://join.slack.com/t/indiecorns/shared_invite/zt-41zeuvjk7-tykDQ1_u7xx7EnawIyGQfw",
+    command: "npx indiecorns join slack",
     verification: "external_platform",
     requires: [CLI_INSTALL_ACTION_ID],
   },
@@ -51,23 +76,39 @@ Usage:
   indiecorns [command] [options]
 
 Commands:
-  wizard                         Run the CLI-first Indiecorns setup wizard
+  wizard                         Connect, add your website, and join Slack
+  assist <request>               Ask the setup or support assistant for exact next commands
+  support-assist <request>       Ask the agent to plan member support targets
   collective                     Show the CLI-first collective command center
   init                           Alias for wizard
   login                          Sign in to Indiecorns in your browser
   signup                         Create an Indiecorns account in your browser
   status                         Show CLI authentication status
-  tasks                          Show onboarding tasks
-  follow <discord>               Open a task and earn onboarding credits
-  join discord                   Open the Indiecorns Discord invite
-  record peerlist --target <u>   Record an external Peerlist follow event
+  tasks                          Show the next setup step
+  follow <task>                  Open an onboarding link
+  follow-members [platform]      Open Indiecorns member profiles to follow
+  engage-members <action> [platform]
+                                 Open member targets for like, reshare, upvote, or comment
+  community-queue [platform]     Show a flat queue of community action targets
+  community-open [platform]      Open queued community action targets
+  community-next [platform]      Show the next community action target
+  community-plan [platform]      Print a read-only multi-action community plan
+  community-status               Summarize community targets, records, and reporting
+  join slack                     Open the Indiecorns Slack invite
+  record <platform> --target <u> Record an external action event
   events                         Show recorded external action events
   profiles [--platform <name>]   Show known external profiles and follow targets
   profile show [platform]        Show your saved external profiles
   profile set peerlist --username <u>
                                  Save your Peerlist username for Indiecorns
-  run                            Run every pending onboarding task
-  complete <discord|all>
+  profile set website --profile-url <url>
+                                 Save your public website URL
+  launch set <platform> --url    Save your launch/project URL for support
+  launch list [platform]         Show your saved launch/project URLs
+  post set <platform> --url      Save your post URL for community engagement
+  post list [platform]           Show your saved post URLs
+  run                            Run safe tasks and show manual next steps
+  complete <slack|all>
                                  Mark an already-finished task as complete
   dashboard                      Open your Indiecorns dashboard
   extension open                 Open the Indiecorns Chrome extension executor
@@ -84,13 +125,20 @@ Options:
   --ndjson                       Stream wizard lifecycle events as NDJSON
   --app-url <url>                Override Indiecorns app URL
   --no-open                      Print auth URL without opening a browser
+  --platform <name>              Platform filter: peerlist, x, linkedin, producthunt, all
+  --limit <number>               Max member profiles to include
   --timeout <seconds>            Login wait timeout, default 180
   --actor <username>             External platform username performing an action
   --target <username>            External platform username being acted on
-  --target-url <url>             External platform profile URL being acted on
+  --target-url <url>             External platform target URL being acted on
+  --target-type <type>           External target type: profile, post, or project
+  --type <event>                 External event type: follow, like, reshare, upvote, comment
   --username <username>          Your external platform username
   --profile-url <url>            Your external platform profile URL
+  --url <url>                    Profile, launch, or target URL
+  --name <name>                  Launch/project name
   --display-name <name>          External platform display name
+  --apply                        Apply safe setup assistant profile saves
   --label-before <label>         Observed button/status label before action
   --label-after <label>          Observed button/status label after action
   --no-telemetry                 Disable telemetry for this invocation
@@ -240,6 +288,12 @@ const printNdjson = (value) => {
   console.log(JSON.stringify({ v: 1, ts: new Date().toISOString(), ...value }))
 }
 
+const summarizeForAgent = (value, maxLength = 12000) => {
+  const text = JSON.stringify(value)
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength)}...`
+}
+
 const printRows = (rows) => {
   for (const row of rows) {
     const icon =
@@ -282,6 +336,39 @@ const writeConfig = (value) => {
   writeFileSync(configPath, `${JSON.stringify(value, null, 2)}\n`, {
     mode: 0o600,
   })
+}
+
+const readEnvValueFromFile = (path, name) => {
+  try {
+    const prefix = `${name}=`
+    const line = readFileSync(path, "utf8")
+      .split(/\r?\n/)
+      .find((item) => item.startsWith(prefix))
+    if (!line) return null
+    const value = line.slice(prefix.length).trim()
+    return value.replace(/^['"]|['"]$/g, "") || null
+  } catch {
+    return null
+  }
+}
+
+const ensureOpenAiApiKey = () => {
+  if (process.env.OPENAI_API_KEY) return true
+  const candidates = [
+    join(appRoot, ".env.local"),
+    join(appRoot, ".env.development.local"),
+    join(appRoot, ".env"),
+    join(process.cwd(), ".env.local"),
+    join(process.cwd(), ".env"),
+  ]
+  for (const candidate of candidates) {
+    const value = readEnvValueFromFile(candidate, "OPENAI_API_KEY")
+    if (value) {
+      process.env.OPENAI_API_KEY = value
+      return true
+    }
+  }
+  return false
 }
 
 const hasToken = () => Boolean(process.env.INDIECORNS_TOKEN)
@@ -625,6 +712,255 @@ const isProfileAction = (action) => action.id?.startsWith("external-profile-")
 const getProfilePlatform = (action) =>
   isProfileAction(action) ? action.id.replace("external-profile-", "") : null
 
+const COMMUNITY_ACTION_PLATFORMS = ["peerlist", "x", "linkedin", "producthunt"]
+const COMMUNITY_ACTION_EVENT_TYPES = [
+  "follow",
+  "like",
+  "reshare",
+  "upvote",
+  "comment",
+]
+const COMMUNITY_TARGET_SOURCES = ["profiles", "posts", "projects"]
+const MEMBER_FOLLOW_PLATFORMS = ["peerlist", "x", "linkedin", "producthunt"]
+
+const normalizeCommunityPlatform = (value) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+  if (normalized === "twitter") return "x"
+  if (normalized === "ph" || normalized === "product-hunt") {
+    return "producthunt"
+  }
+  if (normalized === "members" || normalized === "makers") return "all"
+  return normalized || "all"
+}
+
+const normalizeCommunityEventType = (value) => {
+  const normalized = String(value ?? "follow")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-")
+  if (normalized === "repost" || normalized === "share") return "reshare"
+  if (normalized === "vote") return "upvote"
+  return normalized || "follow"
+}
+
+const normalizeCommunityTargetSource = (value) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-")
+  if (!normalized || normalized === "all") return "all"
+  if (normalized === "profile") return "profiles"
+  if (normalized === "post") return "posts"
+  if (normalized === "project" || normalized === "launch" || normalized === "launches") {
+    return "projects"
+  }
+  return normalized
+}
+
+const getMemberFollowPlatforms = (value) => {
+  const platform = normalizeCommunityPlatform(value)
+  if (platform === "all") return MEMBER_FOLLOW_PLATFORMS
+  return MEMBER_FOLLOW_PLATFORMS.includes(platform) ? [platform] : []
+}
+
+const getCommunityActionPlatforms = (value) => {
+  const platform = normalizeCommunityPlatform(value)
+  if (platform === "all") return COMMUNITY_ACTION_PLATFORMS
+  return COMMUNITY_ACTION_PLATFORMS.includes(platform) ? [platform] : []
+}
+
+const requiresProjectTarget = (eventType) =>
+  eventType === "upvote" || eventType === "comment"
+
+const getCommunityActionSetupCommands = ({
+  eventType,
+  platforms,
+  flags,
+  targetSource = "all",
+}) => {
+  const appUrl = getAppUrl(flags)
+  const commands = []
+
+  for (const platform of platforms) {
+    if (
+      targetSource !== "profiles" &&
+      targetSource !== "posts" &&
+      eventType === "upvote" &&
+      platform === "producthunt"
+    ) {
+      commands.push(
+        `npx indiecorns launch set producthunt --url <url> --name <name> --app-url ${appUrl}`
+      )
+    } else if (
+      targetSource !== "profiles" &&
+      targetSource !== "posts" &&
+      eventType === "upvote" &&
+      platform === "peerlist"
+    ) {
+      commands.push(
+        `npx indiecorns launch set peerlist --url <url> --name <name> --app-url ${appUrl}`
+      )
+    } else if (
+      targetSource !== "profiles" &&
+      targetSource !== "projects" &&
+      ["like", "reshare", "comment"].includes(eventType) &&
+      (platform === "x" || platform === "linkedin")
+    ) {
+      commands.push(
+        `npx indiecorns post set ${platform} --url <url> --title <title> --app-url ${appUrl}`
+      )
+    }
+  }
+
+  return Array.from(new Set(commands))
+}
+
+const summarizeCommunityTargetSources = (targets = []) =>
+  targets.reduce((summary, target) => {
+    const source =
+      target.targetSource ??
+      (target.targetType === "post"
+        ? "posts"
+        : target.targetType === "project"
+          ? "projects"
+          : "profiles")
+    summary[source] = (summary[source] ?? 0) + 1
+    return summary
+  }, {})
+
+const getPlatformProfileUrl = ({ platform, username, profileUrl }) => {
+  if (profileUrl) return profileUrl
+  if (!username) return null
+  if (platform === "peerlist") return `https://peerlist.io/${username}`
+  if (platform === "x") return `https://x.com/${username}`
+  if (platform === "linkedin") return `https://www.linkedin.com/in/${username}`
+  if (platform === "producthunt") {
+    return `https://www.producthunt.com/@${username}`
+  }
+  return null
+}
+
+const normalizeCommunityTargetUrl = (value) => {
+  const url = safeUrl(value)
+  if (!url) return null
+  url.hash = ""
+  return url.toString().replace(/\/$/, "")
+}
+
+const getCommunityTargetUrlParts = (value) => {
+  const url = safeUrl(value)
+  const host = url?.hostname.replace(/^www\./, "").toLowerCase()
+  const segments =
+    url?.pathname
+      .split("/")
+      .map((segment) => segment.trim().toLowerCase())
+      .filter(Boolean) ?? []
+
+  return { host, segments }
+}
+
+const isCommunityPostUrlForPlatform = (platform, value) => {
+  const { host, segments } = getCommunityTargetUrlParts(value)
+
+  if (platform === "x") {
+    return (
+      (host === "x.com" || host === "twitter.com") &&
+      segments.length >= 3 &&
+      segments[1] === "status"
+    )
+  }
+
+  if (platform === "linkedin") {
+    return (
+      host?.endsWith("linkedin.com") &&
+      (segments.includes("posts") ||
+        segments.includes("feed") ||
+        segments.some((segment) => segment.startsWith("activity-")))
+    )
+  }
+
+  return false
+}
+
+const isCommunityLaunchUrlForPlatform = (platform, value) => {
+  const { host, segments } = getCommunityTargetUrlParts(value)
+
+  if (platform === "peerlist") {
+    return host === "peerlist.io" && segments.length >= 3
+  }
+
+  if (platform === "producthunt") {
+    return (
+      host === "producthunt.com" &&
+      segments.length >= 2 &&
+      (segments[0] === "posts" || segments[0] === "products")
+    )
+  }
+
+  return false
+}
+
+const normalizeRecordTargetType = (value) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+  if (!normalized) return null
+  if (normalized === "profile") return "profile_engagement"
+  if (normalized === "profile_follow") return "profile_follow"
+  if (normalized === "profile_engagement") return "profile_engagement"
+  if (normalized === "post") return "post"
+  if (normalized === "project" || normalized === "launch") return "project"
+  return null
+}
+
+const inferRecordTargetType = ({ platform, eventType, targetProfileUrl }) => {
+  if (eventType === "follow") return "profile_follow"
+  if (eventType === "upvote") return "project"
+  if (
+    ["like", "reshare", "comment"].includes(eventType) &&
+    isCommunityPostUrlForPlatform(platform, targetProfileUrl)
+  ) {
+    return "post"
+  }
+  if (
+    ["upvote", "comment"].includes(eventType) &&
+    isCommunityLaunchUrlForPlatform(platform, targetProfileUrl)
+  ) {
+    return "project"
+  }
+  return "profile_engagement"
+}
+
+const shellQuote = (value) => {
+  const text = String(value ?? "")
+  if (/^[A-Za-z0-9_./:@-]+$/.test(text)) return text
+  return `'${text.replace(/'/g, "'\\''")}'`
+}
+
+const getCommunityActionId = (platform, eventType) =>
+  eventType === "follow" ? platform : `${platform}-${eventType}`
+
+const getRecordCommand = (profile, flags, eventType = "follow") => {
+  const targetParts = []
+  if (profile.username) {
+    targetParts.push(`--target ${shellQuote(profile.username)}`)
+  }
+  if (profile.displayName) {
+    targetParts.push(`--display-name ${shellQuote(profile.displayName)}`)
+  }
+  if (profile.targetType) {
+    targetParts.push(`--target-type ${shellQuote(profile.targetType)}`)
+  }
+  if (eventType !== "follow" || !profile.username) {
+    targetParts.push(`--target-url ${shellQuote(profile.profileUrl)}`)
+  }
+  const typeFlag = eventType === "follow" ? "" : ` --type ${eventType}`
+  return `npx indiecorns record ${profile.platform}${typeFlag} ${targetParts.join(" ")} --app-url ${getAppUrl(flags)}`
+}
+
 const getActionCommand = (action, flags) => {
   if (action.agentCommand) {
     return action.agentCommand
@@ -640,7 +976,7 @@ const getActionCommand = (action, flags) => {
       platform === "linkedin"
         ? "--profile-url https://www.linkedin.com/in/"
         : platform === "website"
-          ? "--profile-url <url>"
+          ? "--profile-url https://your-site.com"
           : "--username <username>"
     return `npx indiecorns profile set ${platform} ${valueFlag} --app-url ${getAppUrl(flags)}`
   }
@@ -650,7 +986,7 @@ const getActionCommand = (action, flags) => {
   }
 
   if (action.id === "discord") {
-    return `npx indiecorns join discord --no-open --app-url ${getAppUrl(flags)}`
+    return `npx indiecorns join slack --no-open --app-url ${getAppUrl(flags)}`
   }
 
   return `npx indiecorns follow ${action.id} --no-open --app-url ${getAppUrl(flags)}`
@@ -659,6 +995,10 @@ const getActionCommand = (action, flags) => {
 const getCompleteCommand = (action, flags) => {
   if (action.completeCommand) {
     return action.completeCommand
+  }
+
+  if (action.id === "discord") {
+    return `npx indiecorns complete slack --app-url ${getAppUrl(flags)}`
   }
 
   return isProfileAction(action)
@@ -675,8 +1015,9 @@ const getActionPlatform = (action) => {
   if (action.id === "linkedin" || action.id === "external-profile-linkedin") {
     return "linkedin"
   }
-  if (action.id === "discord") return "discord"
+  if (action.id === "discord") return "slack"
   if (action.id?.includes("peerlist")) return "peerlist"
+  if (action.id?.includes("producthunt")) return "producthunt"
   if (action.id === "external-profile-github") return "github"
   if (action.id === "external-profile-substack") return "substack"
   if (action.id === "external-profile-website") return "website"
@@ -688,7 +1029,8 @@ const isManualAction = (action) => action.id?.endsWith("-comment")
 const getEvidenceRequired = (action) => {
   if (action.evidenceRequired) return action.evidenceRequired
   if (action.verification === "cli_session") return "completed CLI session"
-  if (action.verification === "profile_link") return "saved verified profile link"
+  if (action.verification === "profile_link")
+    return "saved verified profile link"
   if (isManualAction(action)) {
     return "manual completion evidence from the target platform"
   }
@@ -730,10 +1072,14 @@ const getBrowserAssist = (action) => {
 
 const getAgentCapability = (action, authenticated) => {
   if (action.agentCapability) return action.agentCapability
-  if (!authenticated && action.id !== CLI_INSTALL_ACTION_ID) return "blocked_auth"
+  if (!authenticated && action.id !== CLI_INSTALL_ACTION_ID)
+    return "blocked_auth"
   if (action.kind === "command") return "cli_direct"
   if (isProfileAction(action)) return "api_direct"
-  if (action.status === "needs_login" || action.status === "needs_platform_login") {
+  if (
+    action.status === "needs_login" ||
+    action.status === "needs_platform_login"
+  ) {
     return "blocked_platform_login"
   }
   if (isManualAction(action)) return "manual_confirmation"
@@ -787,7 +1133,9 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
   const completedCount = actions.filter(
     (action) => action.status === "completed"
   ).length
-  const openedCount = actions.filter((action) => action.status === "opened").length
+  const openedCount = actions.filter(
+    (action) => action.status === "opened"
+  ).length
   const pendingCount = actions.filter(
     (action) => action.status === "pending"
   ).length
@@ -855,7 +1203,9 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
     plugin: {
       name: "indiecorns",
       installed: existsSync(join(homedir(), "plugins", "indiecorns")),
-      skillsInstalled: existsSync(join(homedir(), ".agents", "skills", "indiecorns")),
+      skillsInstalled: existsSync(
+        join(homedir(), ".agents", "skills", "indiecorns")
+      ),
       skillsRoot: join(homedir(), ".agents", "skills"),
       skills: ["indiecorns"],
       autoInstalledBy: "npx indiecorns login",
@@ -877,8 +1227,9 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
         actions.filter((action) => getBrowserAssist(action).required).length,
       manualRequired:
         plan?.summary?.manualRequired ??
-        actions.filter((action) => getBrowserAssist(action).mode === "manual_record")
-          .length,
+        actions.filter(
+          (action) => getBrowserAssist(action).mode === "manual_record"
+        ).length,
       creditsEarned,
       creditsAvailable,
       pendingCommands,
@@ -888,7 +1239,9 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
     readiness: plan?.readiness ?? {
       cliSession: authenticated,
       pluginRequired: true,
-      extensionUseful: actions.some((action) => getBrowserAssist(action).required),
+      extensionUseful: actions.some(
+        (action) => getBrowserAssist(action).required
+      ),
       blockedAuth: !authenticated,
       blockedPlatformLogin: false,
       nextCommand:
@@ -921,12 +1274,15 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
       agentCommand: action.agentCommand ?? action.command,
       completeCommand:
         action.completeCommand ??
-        (action.id ? `npx indiecorns complete ${action.id} --app-url ${appUrl}` : undefined),
+        (action.id
+          ? `npx indiecorns complete ${action.id} --app-url ${appUrl}`
+          : undefined),
       agentCapability: getAgentCapability(action, authenticated),
       browserAssist: getBrowserAssist(action),
       verification: action.verification,
       evidenceRequired: getEvidenceRequired(action),
-      safeToAutoComplete: getAgentCapability(action, authenticated) === "cli_direct",
+      safeToAutoComplete:
+        getAgentCapability(action, authenticated) === "cli_direct",
       required: action.required,
       requires: action.requires ?? [],
       targetProgress: action.targetProgress,
@@ -936,20 +1292,39 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
       },
       aliases: action.aliases,
     })),
-    nextCommands: plan?.nextCommands ?? [
-      "npx indiecorns login --no-open",
-      "npx indiecorns tasks --agent",
-      "npx indiecorns run --agent",
-      "npx indiecorns extension open --run-next",
-      "npx indiecorns dashboard --no-open",
-    ],
+    nextCommands: Array.from(
+      new Set([
+        ...(plan?.nextCommands ?? [
+          "npx indiecorns login --no-open",
+          "npx indiecorns tasks --agent",
+        "npx indiecorns run --agent",
+        "npx indiecorns extension open --run-next",
+        "npx indiecorns dashboard --no-open",
+      ]),
+      "npx indiecorns follow-members all --agent",
+      "npx indiecorns community-queue --agent",
+      "npx indiecorns community-open --limit 5",
+      "npx indiecorns community-next --agent",
+      "npx indiecorns community-plan --agent",
+        "npx indiecorns community-status --agent",
+        "npx indiecorns engage-members like x --agent",
+        "npx indiecorns engage-members reshare linkedin --agent",
+        "npx indiecorns engage-members comment x --agent",
+        "npx indiecorns post set x --url <url> --title <title>",
+        "npx indiecorns post list all --agent",
+        "npx indiecorns launch set producthunt --url <url> --name <name>",
+        "npx indiecorns launch list all --agent",
+        "npx indiecorns upvote-members producthunt --agent",
+      ])
+    ),
   }
 }
 
 const getAgentPlan = async (flags) => {
   const appUrl = getAppUrl(flags)
   const appPlan = await getAgentPlanFromApp(flags)
-  const fallbackActions = (await getOnboardingActionsFromApp(flags))?.actions ?? ONBOARDING_ACTIONS
+  const appActions = (await getOnboardingActionsFromApp(flags))?.actions
+  const fallbackActions = appActions?.length ? appActions : ONBOARDING_ACTIONS
   const fallbackTaskOutputs = fallbackActions.map((action) =>
     toTaskOutput(action, flags)
   )
@@ -1004,6 +1379,191 @@ const safeUrl = (value) => {
     return new URL(withProtocol(String(value ?? "").trim()))
   } catch {
     return null
+  }
+}
+
+const IMAGE_PROFILE_URL_EXTENSIONS = new Set([
+  ".avif",
+  ".gif",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".svg",
+  ".webp",
+])
+const IMAGE_PROFILE_URL_HOSTS = new Set([
+  "avatars.githubusercontent.com",
+  "gravatar.com",
+  "secure.gravatar.com",
+])
+
+const isImageProfileUrl = (value) => {
+  const url = safeUrl(value)
+  if (!url) {
+    return false
+  }
+
+  const pathname = url.pathname.toLowerCase()
+  const hostname = url.hostname.replace(/^www\./, "").toLowerCase()
+  if (IMAGE_PROFILE_URL_HOSTS.has(hostname)) {
+    return true
+  }
+
+  if (pathname.includes("/avatar") || pathname.includes("/avatars/")) {
+    return true
+  }
+
+  return [...IMAGE_PROFILE_URL_EXTENSIONS].some((extension) =>
+    pathname.endsWith(extension)
+  )
+}
+
+const SETUP_ASSISTANT_PROFILE_PLATFORMS = [
+  "peerlist",
+  "x",
+  "linkedin",
+  "github",
+  "producthunt",
+  "substack",
+  "website",
+]
+
+const SETUP_ASSISTANT_PLATFORM_ALIASES = {
+  twitter: "x",
+  xcom: "x",
+  ph: "producthunt",
+  producthunt: "producthunt",
+  producthuntcom: "producthunt",
+  link: "website",
+  site: "website",
+  homepage: "website",
+}
+
+const normalizeSetupAssistantPlatform = (value) => {
+  const platform = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "")
+  const normalized = SETUP_ASSISTANT_PLATFORM_ALIASES[platform] ?? platform
+  return SETUP_ASSISTANT_PROFILE_PLATFORMS.includes(normalized)
+    ? normalized
+    : null
+}
+
+const inferSetupAssistantPlatform = (value) => {
+  const url = safeUrl(value)
+  if (!url) return null
+  const host = url.hostname.replace(/^www\./, "").toLowerCase()
+  if (host === "peerlist.io") return "peerlist"
+  if (host === "x.com" || host === "twitter.com") return "x"
+  if (host.endsWith("linkedin.com")) return "linkedin"
+  if (host === "github.com") return "github"
+  if (host === "producthunt.com") return "producthunt"
+  if (host.endsWith(".substack.com")) return "substack"
+  return urlLike(value) ? "website" : null
+}
+
+const profileUrlForSetupAssistant = ({ platform, username, profileUrl }) => {
+  if (profileUrl) return withProtocol(profileUrl)
+  if (!username) return null
+  if (platform === "peerlist") return `https://peerlist.io/${username}`
+  if (platform === "x") return `https://x.com/${username}`
+  if (platform === "linkedin") return `https://www.linkedin.com/in/${username}`
+  if (platform === "github") return `https://github.com/${username}`
+  if (platform === "producthunt") {
+    return `https://www.producthunt.com/@${username}`
+  }
+  if (platform === "substack") return `https://${username}.substack.com`
+  if (platform === "website") return withProtocol(username)
+  return null
+}
+
+const setupAssistantCommandForProfile = (
+  { platform, username, profileUrl },
+  flags
+) => {
+  const appUrl = getAppUrl(flags)
+  if (profileUrl || platform === "website" || platform === "linkedin") {
+    const value =
+      profileUrl ??
+      profileUrlForSetupAssistant({ platform, username, profileUrl })
+    return `npx indiecorns profile set ${platform} --profile-url ${shellQuote(value)} --app-url ${shellQuote(appUrl)}`
+  }
+
+  return `npx indiecorns profile set ${platform} --username ${shellQuote(username)} --app-url ${shellQuote(appUrl)}`
+}
+
+const normalizeSetupAssistantProfileInput = ({
+  platform: platformInput,
+  value,
+  flags = {},
+}) => {
+  const rawValue = String(value ?? "").trim()
+  if (!rawValue) {
+    return {
+      ok: false,
+      reason: "missing_input",
+      message: "Missing profile value.",
+    }
+  }
+
+  const platform =
+    normalizeSetupAssistantPlatform(platformInput) ??
+    inferSetupAssistantPlatform(rawValue)
+  if (!platform) {
+    return {
+      ok: false,
+      reason: "unknown_platform",
+      message: "Tell me which platform this profile belongs to.",
+    }
+  }
+
+  if (platform === "website" && isImageProfileUrl(rawValue)) {
+    return {
+      ok: false,
+      platform,
+      reason: "image_url",
+      message: "Use your website URL, not an image URL.",
+    }
+  }
+
+  const isUrl = urlLike(rawValue)
+  const url = isUrl ? safeUrl(rawValue) : null
+  const username =
+    platform === "website" && url
+      ? url.hostname.replace(/^www\./, "").toLowerCase()
+      : isUrl
+        ? profileUsernameFromUrl(platform, rawValue)
+        : rawValue.replace(/^@/, "").trim()
+  const profileUrl = isUrl
+    ? withProtocol(rawValue)
+    : platform === "website"
+      ? withProtocol(rawValue)
+      : null
+
+  if (!username && !profileUrl) {
+    return {
+      ok: false,
+      platform,
+      reason: "unusable_input",
+      message: "Could not read a username or profile URL from that value.",
+    }
+  }
+
+  const normalized = {
+    ok: true,
+    platform,
+    username,
+    profileUrl,
+  }
+
+  return {
+    ...normalized,
+    command: setupAssistantCommandForProfile(normalized, flags),
+    message:
+      platform === "website"
+        ? `Website profile ready for ${username}.`
+        : `${platform} profile ready for @${username}.`,
   }
 }
 
@@ -1147,7 +1707,12 @@ const resolveRedirectUrl = async (value) => {
   }
 }
 
-const resolveProfileInput = async ({ flags, platform, username, profileUrl }) => {
+const resolveProfileInput = async ({
+  flags,
+  platform,
+  username,
+  profileUrl,
+}) => {
   const candidate = profileUrl ?? (urlLike(username) ? username : null)
   let resolvedProfileUrl = candidate ? withProtocol(candidate) : profileUrl
   let resolvedUsername = username && !urlLike(username) ? username : null
@@ -1175,8 +1740,12 @@ const resolveProfileInput = async ({ flags, platform, username, profileUrl }) =>
     ) {
       openUrl(resolvedProfileUrl)
       resolution.openedBrowser = true
-      const resolveDelayMs = Number.parseInt(flags["resolve-delay"] ?? "5000", 10)
-      const deadline = Date.now() + (Number.isFinite(resolveDelayMs) ? resolveDelayMs : 5000)
+      const resolveDelayMs = Number.parseInt(
+        flags["resolve-delay"] ?? "5000",
+        10
+      )
+      const deadline =
+        Date.now() + (Number.isFinite(resolveDelayMs) ? resolveDelayMs : 5000)
       while (Date.now() < deadline) {
         const browserUrl = readActiveBrowserUrl(
           (url) =>
@@ -1300,7 +1869,111 @@ const getExternalActionEventsFromApp = async (flags) => {
   if (flags.action) {
     url.searchParams.set("actionId", flags.action)
   }
-  if (flags.platform) {
+  const platform = normalizeCommunityPlatform(flags.platform)
+  if (platform && platform !== "all") {
+    url.searchParams.set("platform", platform)
+  }
+  const eventType = normalizeCommunityEventType(
+    flags.type ?? flags["event-type"] ?? flags.actionType ?? "all"
+  )
+  if (eventType && eventType !== "all") {
+    url.searchParams.set("eventType", eventType)
+  }
+  if (flags.status) {
+    url.searchParams.set("status", flags.status)
+  }
+  if (flags.limit) {
+    url.searchParams.set("limit", flags.limit)
+  }
+
+  const response = await fetch(url, { headers })
+
+  if (!response.ok) {
+    return null
+  }
+
+  return response.json()
+}
+
+const summarizeExternalActionEvents = (events) => {
+  const byPlatform = {}
+  const byEventType = {}
+  const byActionGroup = {
+    follow: 0,
+    engagement: 0,
+  }
+  const byTargetType = {}
+  const byTargetSource = {}
+  let lastRecordedAt = null
+
+  for (const event of events) {
+    const platform = event.platform ?? "unknown"
+    const eventType = event.event_type ?? "unknown"
+    const actionGroup = eventType === "follow" ? "follow" : "engagement"
+    const targetType =
+      event.metadata?.targetType ??
+      (eventType === "follow"
+        ? "profile_follow"
+        : eventType === "upvote"
+          ? "project"
+          : "profile_engagement")
+    const targetSource =
+      event.target_source ??
+      (targetType === "post"
+        ? "posts"
+        : targetType === "project"
+          ? "projects"
+          : "profiles")
+
+    byPlatform[platform] = (byPlatform[platform] ?? 0) + 1
+    byEventType[eventType] = (byEventType[eventType] ?? 0) + 1
+    byActionGroup[actionGroup] = (byActionGroup[actionGroup] ?? 0) + 1
+    byTargetType[targetType] = (byTargetType[targetType] ?? 0) + 1
+    byTargetSource[targetSource] = (byTargetSource[targetSource] ?? 0) + 1
+
+    const recordedAt = event.updated_at ?? event.created_at
+    if (recordedAt && (!lastRecordedAt || recordedAt > lastRecordedAt)) {
+      lastRecordedAt = recordedAt
+    }
+  }
+
+  return {
+    total: events.length,
+    byPlatform,
+    byEventType,
+    byActionGroup,
+    byTargetType,
+    byTargetSource,
+    lastRecordedAt,
+  }
+}
+
+const getCommunityReportingInfo = (flags) => {
+  const appUrl = getAppUrl(flags)
+  return {
+    dashboard: {
+      activityUrl: `${appUrl}/dashboard/activity`,
+      usersUrl: `${appUrl}/dashboard/users`,
+      command: `npx indiecorns dashboard --no-open --app-url ${appUrl}`,
+    },
+    reportingViews: [
+      "public.indiecorns_community_activity_events",
+      "public.indiecorns_community_activity_daily",
+      "public.indiecorns_community_member_metrics",
+    ],
+    note:
+      "Recorded external action events feed the activity dashboard, member metrics, and Data Studio-ready public reporting views.",
+  }
+}
+
+const getExternalProfilesFromApp = async (flags) => {
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return null
+  }
+
+  const url = new URL(`${getAppUrl(flags)}/api/users/external-profiles`)
+  if (flags.platform && flags.platform !== "all") {
     url.searchParams.set("platform", flags.platform)
   }
 
@@ -1313,15 +1986,30 @@ const getExternalActionEventsFromApp = async (flags) => {
   return response.json()
 }
 
-const getExternalProfilesFromApp = async (flags) => {
+const getCommunityActionTargetsFromApp = async (flags) => {
   const headers = getCliAuthHeaders()
   if (!headers) {
     return null
   }
 
-  const url = new URL(`${getAppUrl(flags)}/api/users/external-profiles`)
+  const url = new URL(`${getAppUrl(flags)}/api/community/action-targets`)
   if (flags.platform && flags.platform !== "all") {
     url.searchParams.set("platform", flags.platform)
+  }
+  if (flags.type || flags["event-type"]) {
+    url.searchParams.set("eventType", flags.type ?? flags["event-type"])
+  }
+  const targetSource = normalizeCommunityTargetSource(
+    flags["target-source"] ?? flags.targetSource ?? "all"
+  )
+  if (targetSource !== "all") {
+    url.searchParams.set(
+      "targetSource",
+      targetSource
+    )
+  }
+  if (flags.limit) {
+    url.searchParams.set("limit", flags.limit)
   }
 
   const response = await fetch(url, { headers })
@@ -1349,10 +2037,22 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
   })
   const username = resolved.username ?? rawUsername
   const profileUrl = resolved.profileUrl ?? rawProfileUrl
+  if (platform === "website" && profileUrl && isImageProfileUrl(profileUrl)) {
+    return {
+      saved: false,
+      message:
+        "Use your website URL, not an image URL. If the URL contains ?, wrap it in quotes.",
+      resolution: resolved.resolution,
+    }
+  }
+
   if (!username && !profileUrl) {
     return {
       saved: false,
-      message: "Missing --username or --profile-url.",
+      message:
+        platform === "website"
+          ? "Add your website URL. Example: indiecorns profile set website --profile-url https://your-site.com"
+          : "Missing --username or --profile-url.",
       resolution: resolved.resolution,
     }
   }
@@ -1398,11 +2098,214 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
   )
 
   if (!response.ok) {
-    return null
+    let message = `Unable to save ${platform} profile.`
+    try {
+      const body = await response.json()
+      if (typeof body?.message === "string" && body.message.trim()) {
+        message = body.message.trim()
+      }
+    } catch {
+      // Keep the generic message when the app returns a non-JSON error.
+    }
+    return {
+      saved: false,
+      message,
+      resolution: resolved.resolution,
+    }
   }
 
   const body = await response.json()
   return { ...body, resolution: resolved.resolution }
+}
+
+const saveCommunityLaunchToApp = async ({ flags, platform }) => {
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return null
+  }
+
+  const launchUrl = flags["launch-url"] ?? flags.url ?? flags["target-url"]
+  if (!launchUrl) {
+    return {
+      saved: false,
+      message: "Missing --url.",
+    }
+  }
+  const normalizedLaunchUrl = normalizeCommunityTargetUrl(launchUrl)
+  if (
+    !normalizedLaunchUrl ||
+    !isCommunityLaunchUrlForPlatform(platform, normalizedLaunchUrl)
+  ) {
+    return {
+      saved: false,
+      message: `Pass a valid ${platform} launch URL.`,
+    }
+  }
+
+  const response = await fetch(`${getAppUrl(flags)}/api/community/launches`, {
+    method: "POST",
+    headers: {
+      ...headers,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      platform,
+      launchUrl: normalizedLaunchUrl,
+      name: flags.name ?? flags["display-name"],
+      description: flags.description,
+      imageUrl: flags["image-url"],
+      launchedAt: flags["launched-at"],
+      status: flags.status,
+    }),
+  })
+
+  if (!response.ok) {
+    let message = `Unable to save ${platform} launch.`
+    try {
+      const body = await response.json()
+      if (typeof body?.message === "string" && body.message.trim()) {
+        message = body.message.trim()
+      }
+    } catch {
+      // Keep the generic message when the app returns a non-JSON error.
+    }
+    return {
+      saved: false,
+      message,
+    }
+  }
+
+  return response.json()
+}
+
+const getCommunityLaunchesFromApp = async ({ flags, platform }) => {
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return null
+  }
+
+  const url = new URL(`${getAppUrl(flags)}/api/community/launches`)
+  if (platform && platform !== "all") {
+    url.searchParams.set("platform", platform)
+  }
+  if (flags.status) {
+    url.searchParams.set("status", flags.status)
+  }
+  if (flags.limit) {
+    url.searchParams.set("limit", flags.limit)
+  }
+
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    let message = "Unable to load launches."
+    try {
+      const body = await response.json()
+      if (typeof body?.message === "string" && body.message.trim()) {
+        message = body.message.trim()
+      }
+    } catch {
+      // Keep the generic message when the app returns a non-JSON error.
+    }
+    return { launches: [], message }
+  }
+
+  return response.json()
+}
+
+const saveCommunityPostToApp = async ({ flags, platform }) => {
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return null
+  }
+
+  const postUrl = flags["post-url"] ?? flags.url ?? flags["target-url"]
+  if (!postUrl) {
+    return {
+      saved: false,
+      message: "Missing --url.",
+    }
+  }
+  const normalizedPostUrl = normalizeCommunityTargetUrl(postUrl)
+  if (!normalizedPostUrl || !isCommunityPostUrlForPlatform(platform, normalizedPostUrl)) {
+    return {
+      saved: false,
+      message: `Pass a valid ${platform} post URL.`,
+    }
+  }
+
+  const response = await fetch(`${getAppUrl(flags)}/api/community/posts`, {
+    method: "POST",
+    headers: {
+      ...headers,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      platform,
+      postUrl: normalizedPostUrl,
+      title: flags.title ?? flags.name ?? flags["display-name"],
+      authorUsername: flags.author ?? flags["author-username"],
+      status: flags.status,
+    }),
+  })
+
+  if (!response.ok) {
+    let message =
+      response.status === 404
+        ? `The ${platform} post API is not available at ${getAppUrl(flags)} yet. Deploy the current app before saving shared posts there.`
+        : `Unable to save ${platform} post.`
+    try {
+      const body = await response.json()
+      if (typeof body?.message === "string" && body.message.trim()) {
+        message = body.message.trim()
+      }
+    } catch {
+      // Keep the generic message when the app returns a non-JSON error.
+    }
+    return {
+      saved: false,
+      message,
+    }
+  }
+
+  return response.json()
+}
+
+const getCommunityPostsFromApp = async ({ flags, platform }) => {
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return null
+  }
+
+  const platforms = platform === "all" ? ["x", "linkedin"] : [platform]
+  const posts = []
+  for (const item of platforms) {
+    const url = new URL(`${getAppUrl(flags)}/api/community/posts`)
+    url.searchParams.set("platform", item)
+    if (flags.status) {
+      url.searchParams.set("status", flags.status)
+    }
+    if (flags.limit) {
+      url.searchParams.set("limit", flags.limit)
+    }
+
+    const response = await fetch(url, { headers })
+    if (!response.ok) {
+      let message = `Unable to load ${item} posts.`
+      try {
+        const body = await response.json()
+        if (typeof body?.message === "string" && body.message.trim()) {
+          message = body.message.trim()
+        }
+      } catch {
+        // Keep the generic message when the app returns a non-JSON error.
+      }
+      return { posts, message }
+    }
+    const body = await response.json()
+    posts.push(...(body.posts ?? []))
+  }
+
+  return { posts }
 }
 
 const saveExternalActionEventToApp = async ({
@@ -1412,24 +2315,49 @@ const saveExternalActionEventToApp = async ({
   eventType = "follow",
   status = "followed",
 }) => {
-  const headers = getCliAuthHeaders()
-  if (!headers) {
-    return null
-  }
-
   const targetUsername = flags.target ?? flags["target-username"]
+  const explicitTargetProfileUrl =
+    flags["target-url"] ?? flags.url ?? flags["post-url"] ?? flags["launch-url"]
   const targetProfileUrl =
-    flags["target-url"] ??
-    flags.url ??
-    (platform === "peerlist" && targetUsername
-      ? `https://peerlist.io/${targetUsername}`
-      : undefined)
+    explicitTargetProfileUrl ??
+    getPlatformProfileUrl({
+      platform,
+      username: targetUsername,
+    })
+  const rawTargetType = flags["target-type"] ?? flags.targetType
+  const targetType =
+    normalizeRecordTargetType(rawTargetType) ??
+    inferRecordTargetType({ platform, eventType, targetProfileUrl })
+  const queueKey = flags["queue-key"] ?? flags.queueKey ?? null
 
   if (!targetProfileUrl) {
     return {
       saved: false,
       message: "Missing --target-url or --target.",
     }
+  }
+
+  if (rawTargetType && !normalizeRecordTargetType(rawTargetType)) {
+    return {
+      saved: false,
+      message: "Unknown --target-type. Use profile, post, or project.",
+    }
+  }
+
+  if (
+    !explicitTargetProfileUrl &&
+    (targetType === "post" || targetType === "project")
+  ) {
+    return {
+      saved: false,
+      message:
+        "Recording post and project actions requires an explicit --target-url.",
+    }
+  }
+
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return null
   }
 
   const response = await fetch(`${getAppUrl(flags)}/api/onboarding/events`, {
@@ -1453,6 +2381,8 @@ const saveExternalActionEventToApp = async ({
       evidenceUrl: flags["evidence-url"],
       metadata: {
         recordedBy: "indiecorns-cli",
+        targetType,
+        ...(queueKey ? { queueKey } : {}),
       },
     }),
   })
@@ -1616,7 +2546,9 @@ const runBrowserAuth = async (flags, mode = "login") => {
         console.log(`User: ${session.userEmail}`)
       }
       if (session.pluginInstall?.installed) {
-        console.log(ok("Agent plugin and skills installed for local coding agents."))
+        console.log(
+          ok("Agent plugin and skills installed for local coding agents.")
+        )
       } else if (session.pluginInstall?.error) {
         console.log(
           warn(`Plugin install skipped: ${session.pluginInstall.error}`)
@@ -1659,7 +2591,9 @@ const runAuthStatus = async (flags) => {
     section("Auth")
     console.log(ok("Authenticated with INDIECORNS_TOKEN."))
     if (pluginInstall.installed) {
-      console.log(ok("Agent plugin and skills installed for local coding agents."))
+      console.log(
+        ok("Agent plugin and skills installed for local coding agents.")
+      )
     }
     return 0
   }
@@ -1700,7 +2634,9 @@ const runAuthStatus = async (flags) => {
         console.log(`User: ${session.userEmail}`)
       }
       if (installResult.pluginInstall.installed) {
-        console.log(ok("Agent plugin and skills installed for local coding agents."))
+        console.log(
+          ok("Agent plugin and skills installed for local coding agents.")
+        )
       }
       return 0
     }
@@ -1747,7 +2683,9 @@ const runAuthStatus = async (flags) => {
     console.log(ok("Browser sign-in completed for this machine."))
     console.log(`App: ${config.browserSession.appUrl}`)
     if (pluginInstall.installed) {
-      console.log(ok("Agent plugin and skills installed for local coding agents."))
+      console.log(
+        ok("Agent plugin and skills installed for local coding agents.")
+      )
     }
     return 0
   }
@@ -1793,7 +2731,8 @@ const findAgentPlanAction = async (flags, input) => {
   )
 }
 
-const normalizeActionUrl = (action) => action.targetUrl ?? action.url ?? action.href
+const normalizeActionUrl = (action) =>
+  action.targetUrl ?? action.url ?? action.href
 
 const toTaskOutput = (action, flags) => {
   const baseAction = findAction(action.id) ?? action
@@ -1881,55 +2820,61 @@ const runTasks = async (flags) => {
     return 0
   }
 
-  printBrandHeader("found your next onboarding moves.")
-  section("Progress")
+  const quickStartTasks = QUICK_START_ACTION_IDS.map((actionId) =>
+    taskOutputs.find((action) => action.id === actionId)
+  ).filter(Boolean)
+  const pendingQuickStart = quickStartTasks.filter(
+    (action) => action.status !== "completed"
+  )
+  const completedQuickStart = quickStartTasks.length - pendingQuickStart.length
+
+  printBrandHeader("found your next step.")
+  section("Quick start")
   console.log(
-    `${completedTasks.length}/${taskOutputs.length} complete · ${creditsEarned}/${creditsAvailable} credits`
+    `${completedQuickStart}/${quickStartTasks.length} complete · connect, add your website, join Slack`
   )
 
-  if (pendingTasks.length > 0) {
-    section(cliInstalled ? "Next Best Moves" : "Start Here")
-    for (const action of pendingTasks) {
+  if (pendingQuickStart.length > 0) {
+    section("Do this next")
+    for (const action of pendingQuickStart) {
       if (!cliInstalled && action.id !== CLI_INSTALL_ACTION_ID) {
         continue
       }
       console.log(`${ok(action.command.replace(/^npx /, ""))}`)
-      console.log(`  ${action.title} (+${action.credits} credits)`)
-    }
-    if (agentPlan.desktopAutomation?.available) {
-      console.log("")
-      console.log(
-        `Desktop automation: ${ok(agentPlan.desktopAutomation.runCommand.replace(/^npx /, ""))}`
-      )
+      console.log(`  ${action.title}`)
+      break
     }
     if (!cliInstalled) {
       console.log("")
-      console.log(warn("The rest unlock after this terminal is authenticated."))
-      console.log(dim("Login installs the local agent plugin and skills automatically."))
+      console.log(dim("Sign in once. The CLI will show the next step."))
     }
+  } else {
+    console.log(ok("Your Indiecorns setup is complete."))
+    console.log(dim("Run indiecorns community-next to support one maker."))
   }
 
-  if (completedTasks.length > 0) {
-    section("Already Done")
-    for (const action of completedTasks) {
-      console.log(`${ok("done")} ${action.title} (+${action.credits} credits)`)
-    }
+  const optionalPendingCount = pendingTasks.filter(
+    (action) => !QUICK_START_ACTION_IDS.includes(action.id)
+  ).length
+  if (optionalPendingCount > 0) {
+    console.log("")
+    console.log(
+      dim(`${optionalPendingCount} optional community actions are available after setup.`)
+    )
   }
 
   console.log("")
-  console.log(`Run ${ok("indiecorns run")} and I will walk the queue for you.`)
-  console.log(
-    `Run ${ok("indiecorns tasks --json")} for automation-friendly output.`
-  )
+  console.log(`Run ${ok("indiecorns tasks --json")} for the full agent plan.`)
   return 0
 }
 
 const runFollow = async (flags, target) => {
-  const action = findAction(target) ?? (await findAgentPlanAction(flags, target))
+  const action =
+    findAction(target) ?? (await findAgentPlanAction(flags, target))
 
   if (!action) {
     console.error(fail("Unknown follow task."))
-    console.error("Try: indiecorns join discord")
+    console.error("Try: indiecorns join slack")
     console.error("Or:  indiecorns profile set peerlist --username <username>")
     return 1
   }
@@ -1980,14 +2925,24 @@ const runFollow = async (flags, target) => {
   }
 
   if (flags.open === false || flags["no-open"]) {
-    console.log(`If the browser does not open, copy this URL: ${normalizeActionUrl(action)}`)
-    console.log("After following, return to Indiecorns to continue onboarding.")
+    console.log(
+      `If the browser does not open, copy this URL: ${normalizeActionUrl(action)}`
+    )
+    console.log(
+      action.id === "discord"
+        ? "After joining Slack, run: indiecorns complete slack"
+        : "Complete the action, then return to Indiecorns."
+    )
     return 0
   }
 
   if (openUrl(normalizeActionUrl(action))) {
     console.log(ok("Opened your browser."))
-    console.log("After the external action is done, come back and keep going.")
+    console.log(
+      action.id === "discord"
+        ? "After joining Slack, run: indiecorns complete slack"
+        : "Complete the action, then return to Indiecorns."
+    )
     return 0
   }
 
@@ -2151,7 +3106,7 @@ const runComplete = async (flags, target) => {
 
   if (selectedActions.length === 0) {
     console.error(fail("Unknown task to complete."))
-    console.error("Try: indiecorns complete discord")
+    console.error("Try: indiecorns complete slack")
     console.error("Or:  indiecorns profile set peerlist --username <username>")
     console.error("Or:  indiecorns complete all")
     return 1
@@ -2201,21 +3156,37 @@ const runComplete = async (flags, target) => {
 }
 
 const runRecord = async (flags, target) => {
-  const platform = target ?? flags.platform ?? "peerlist"
-  const action = findAction(platform)
+  const platform = normalizeCommunityPlatform(
+    target ?? flags.platform ?? "peerlist"
+  )
+  const eventType = normalizeCommunityEventType(
+    flags.type ?? flags["event-type"] ?? flags.action ?? "follow"
+  )
 
-  if (!action) {
+  if (!COMMUNITY_ACTION_PLATFORMS.includes(platform)) {
     console.error(fail("Unknown external action to record."))
     console.error("Try: indiecorns record peerlist --target <username>")
+    console.error("Or:  indiecorns record x --type like --target-url <url>")
+    console.error(
+      "Or:  indiecorns record producthunt --type upvote --target-url <url>"
+    )
+    return 1
+  }
+
+  if (!COMMUNITY_ACTION_EVENT_TYPES.includes(eventType)) {
+    console.error(fail("Unknown external event type."))
+    console.error(
+      "Try: --type follow, --type like, --type reshare, --type upvote, or --type comment"
+    )
     return 1
   }
 
   const savedEvent = await saveExternalActionEventToApp({
     flags,
-    actionId: action.id,
-    platform: action.id,
-    eventType: "follow",
-    status: "followed",
+    actionId: getCommunityActionId(platform, eventType),
+    platform,
+    eventType,
+    status: eventType === "follow" ? "followed" : "completed",
   })
 
   const output = {
@@ -2225,7 +3196,7 @@ const runRecord = async (flags, target) => {
     message: savedEvent?.message,
   }
 
-  if (flags.json) {
+  if (flags.json || flags.agent) {
     printJson(output)
     return output.saved ? 0 : 1
   }
@@ -2248,7 +3219,7 @@ const runRecord = async (flags, target) => {
     output.event?.target_profile_url
   console.log(
     ok(
-      `Recorded ${output.event?.actor_username ?? "user"} follows ${targetLabel} on ${platform}.`
+      `Recorded ${output.event?.actor_username ?? "user"} ${eventType}s ${targetLabel} on ${platform}.`
     )
   )
   return 0
@@ -2256,12 +3227,25 @@ const runRecord = async (flags, target) => {
 
 const runEvents = async (flags) => {
   const events = await getExternalActionEventsFromApp(flags)
+  const limitedEvents = flags.limit
+    ? (events?.events ?? []).slice(0, Number.parseInt(flags.limit, 10) || 50)
+    : (events?.events ?? [])
   const output = {
     authenticated: Boolean(getCliAuthHeaders()),
-    events: events?.events ?? [],
+    filters: {
+      platform: normalizeCommunityPlatform(flags.platform),
+      eventType: normalizeCommunityEventType(
+        flags.type ?? flags["event-type"] ?? flags.actionType ?? "all"
+      ),
+      status: flags.status ?? null,
+      limit: flags.limit ? Number.parseInt(flags.limit, 10) || null : null,
+    },
+    summary: summarizeExternalActionEvents(limitedEvents),
+    reporting: getCommunityReportingInfo(flags),
+    events: limitedEvents,
   }
 
-  if (flags.json) {
+  if (flags.json || flags.agent) {
     printJson(output)
     return output.authenticated ? 0 : 1
   }
@@ -2274,14 +3258,22 @@ const runEvents = async (flags) => {
   }
 
   console.log(color("Indiecorns external action events", colors.cyan))
+  console.log(
+    dim(
+      `${output.summary.total} events, ${output.summary.byActionGroup.follow} follows, ${output.summary.byActionGroup.engagement} engagements`
+    )
+  )
   for (const event of output.events) {
     const actor = event.actor_username ?? "user"
     const target =
       event.target_username ??
       event.target_display_name ??
       event.target_profile_url
+    const targetType =
+      event.metadata?.targetType ??
+      (event.event_type === "follow" ? "profile_follow" : "profile_engagement")
     console.log(
-      `${ok(event.status)} ${actor} ${event.event_type}s ${target} on ${event.platform}`
+      `${ok(event.status)} ${actor} ${event.event_type}s ${target} on ${event.platform} ${dim(targetType)}`
     )
   }
   return 0
@@ -2337,6 +3329,1401 @@ const runProfiles = async (flags) => {
   return 0
 }
 
+const sanitizeSetupAssistantOutput = (assistantOutput, flags) => {
+  const actions = []
+  const blocked = Array.isArray(assistantOutput?.blocked)
+    ? [...assistantOutput.blocked]
+    : []
+
+  for (const action of assistantOutput?.actions ?? []) {
+    if (action?.kind !== "profile_save") continue
+    const normalized = normalizeSetupAssistantProfileInput({
+      platform: action.platform,
+      value: action.profileUrl ?? action.username,
+      flags,
+    })
+
+    if (!normalized.ok) {
+      blocked.push({
+        input: action.profileUrl ?? action.username ?? null,
+        reason: normalized.reason,
+        message: normalized.message,
+      })
+      continue
+    }
+
+    actions.push({
+      kind: "profile_save",
+      platform: normalized.platform,
+      username: normalized.username,
+      profileUrl: normalized.profileUrl,
+      command: normalized.command,
+      reason: action.reason ?? normalized.message,
+    })
+  }
+
+  return {
+    message:
+      assistantOutput?.message ??
+      (actions.length
+        ? "Profile setup commands are ready."
+        : "No safe profile setup command was found."),
+    actions,
+    blocked,
+  }
+}
+
+const buildSetupAssistant = async (flags) => {
+  const [{ Agent, run, setTracingDisabled, tool }, { z }] = await Promise.all([
+    import("@openai/agents"),
+    import("zod"),
+  ])
+  setTracingDisabled(!flags.trace && !flags.tracing)
+
+  const setupAssistantOutputSchema = z.object({
+    message: z.string(),
+    actions: z
+      .array(
+        z.object({
+          kind: z.enum(["profile_save"]),
+          platform: z.enum(SETUP_ASSISTANT_PROFILE_PLATFORMS),
+          username: z.string().nullable(),
+          profileUrl: z.string().nullable(),
+          command: z.string(),
+          reason: z.string(),
+        })
+      )
+      .max(8),
+    blocked: z
+      .array(
+        z.object({
+          input: z.string().nullable(),
+          reason: z.string(),
+          message: z.string(),
+        })
+      )
+      .max(8),
+  })
+
+  const normalizeProfileTool = tool({
+    name: "normalize_profile_input",
+    description:
+      "Normalize one Indiecorns profile value into a safe profile-save command. Call this for every user-provided handle or URL before returning it.",
+    parameters: z.object({
+      platform: z
+        .enum(SETUP_ASSISTANT_PROFILE_PLATFORMS)
+        .optional()
+        .describe("Platform if the user named one."),
+      value: z.string().describe("The raw handle, domain, or profile URL."),
+    }),
+    execute: async ({ platform, value }) =>
+      normalizeSetupAssistantProfileInput({ platform, value, flags }),
+  })
+
+  return {
+    agent: new Agent({
+      name: "Indiecorns setup assistant",
+      instructions: [
+        "You help a user finish Indiecorns setup from messy natural-language input.",
+        "Only return profile_save actions for Peerlist, X, LinkedIn, GitHub, Substack, or website profile setup.",
+        "Always call normalize_profile_input for each handle, domain, or URL before returning it.",
+        "Never claim a follow, upvote, join, post, or browser action was completed.",
+        "If the user provides an avatar/image URL, block it and ask for the real website URL.",
+        "Keep messages short. Prefer exact CLI commands over explanation.",
+      ].join("\n"),
+      tools: [normalizeProfileTool],
+      outputType: setupAssistantOutputSchema,
+    }),
+    run,
+  }
+}
+
+const runSetupAssistant = async (flags, promptParts) => {
+  const request = promptParts.join(" ").trim()
+  const agentPlan = await getAgentPlan({
+    ...flags,
+    source: "cli_setup_assistant",
+  })
+  const profileActions = agentPlan.actions
+    .filter((action) => action.verification === "profile_link")
+    .map((action) => ({
+      id: action.id,
+      title: action.title,
+      status: action.status,
+      platform: action.platform,
+      command: action.agentCommand,
+    }))
+
+  if (!ensureOpenAiApiKey()) {
+    const output = {
+      ok: false,
+      applied: false,
+      message:
+        "OPENAI_API_KEY is required for the setup assistant. Deterministic setup still works with: npx indiecorns tasks --agent",
+      actions: [],
+      blocked: [],
+      profileActions,
+    }
+    if (flags.json || flags.agent) printJson(output)
+    else console.log(warn(output.message))
+    return 1
+  }
+
+  const { agent, run } = await buildSetupAssistant(flags)
+  let result
+  try {
+    result = await run(
+      agent,
+      [
+        request
+          ? `User request: ${request}`
+          : "User did not provide details. Suggest the next missing profile setup command from the current plan.",
+        `App URL: ${getAppUrl(flags)}`,
+        `Authenticated CLI: ${Boolean(getCliAuthHeaders())}`,
+        `Current profile setup actions: ${JSON.stringify(profileActions)}`,
+        "Return only safe profile setup actions that can be represented by npx indiecorns profile set.",
+      ].join("\n"),
+      { maxTurns: 6 }
+    )
+  } catch (error) {
+    const output = {
+      ok: false,
+      applied: false,
+      message:
+        error instanceof Error
+          ? `Setup assistant failed: ${error.message}`
+          : "Setup assistant failed.",
+      actions: [],
+      blocked: [],
+      profileActions,
+    }
+    if (flags.json || flags.agent) printJson(output)
+    else console.log(warn(output.message))
+    return 1
+  }
+
+  const planned = sanitizeSetupAssistantOutput(result.finalOutput, flags)
+  const applied = []
+
+  if (flags.apply) {
+    for (const action of planned.actions) {
+      const saved = await saveExternalProfileToApp({
+        flags: {
+          ...flags,
+          username: action.username,
+          "profile-url": action.profileUrl,
+          source: "cli_setup_assistant",
+        },
+        platform: action.platform,
+      })
+      applied.push({
+        platform: action.platform,
+        saved: Boolean(saved?.saved),
+        profile: saved?.profile ?? null,
+        message: saved?.message ?? null,
+      })
+    }
+  }
+
+  const output = {
+    ok: true,
+    applied: Boolean(flags.apply),
+    message: planned.message,
+    actions: planned.actions,
+    blocked: planned.blocked,
+    results: applied,
+    profileActions,
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return flags.apply ? (applied.every((item) => item.saved) ? 0 : 1) : 0
+  }
+
+  console.log(color("Indiecorns setup assistant", colors.cyan))
+  if (planned.message) console.log(planned.message)
+  for (const action of planned.actions) {
+    console.log(`  ${ok(action.command)}`)
+  }
+  for (const item of planned.blocked) {
+    console.log(`  ${warn(item.message)}`)
+  }
+  if (flags.apply) {
+    for (const item of applied) {
+      console.log(
+        `  ${
+          item.saved
+            ? ok(`Saved ${item.platform}.`)
+            : warn(item.message ?? `Could not save ${item.platform}.`)
+        }`
+      )
+    }
+  } else if (planned.actions.length > 0) {
+    console.log("")
+    console.log(dim("Run again with --apply to save these profile links."))
+  }
+
+  return flags.apply ? (applied.every((item) => item.saved) ? 0 : 1) : 0
+}
+
+const ASSISTANT_SUPPORT_KEYWORDS = [
+  "community",
+  "engage",
+  "everyone",
+  "find",
+  "follow",
+  "linkedin",
+  "member",
+  "members",
+  "peerlist",
+  "producthunt",
+  "profiles",
+  "support",
+  "targets",
+  "upvote",
+]
+
+const isCommunitySupportRequest = (promptParts) => {
+  const request = promptParts.join(" ").toLowerCase()
+  if (!request.trim()) return false
+  return ASSISTANT_SUPPORT_KEYWORDS.some((keyword) =>
+    request.includes(keyword)
+  )
+}
+
+const collectCommunityActionTargets = async (
+  flags,
+  eventTypeInput,
+  platformInput
+) => {
+  const eventType = normalizeCommunityEventType(eventTypeInput)
+  const platforms =
+    eventType === "follow"
+      ? getMemberFollowPlatforms(platformInput ?? flags.platform ?? "all")
+      : getCommunityActionPlatforms(platformInput ?? flags.platform ?? "all")
+  const targetSourceFilter = normalizeCommunityTargetSource(
+    flags["target-source"] ?? flags.targetSource ?? "all"
+  )
+  const setupCommands = getCommunityActionSetupCommands({
+    eventType,
+    platforms,
+    flags,
+    targetSource: targetSourceFilter,
+  })
+
+  if (platforms.length === 0) {
+    return {
+      ok: false,
+      message: "Unknown community action platform.",
+      hints: [
+        "Try: indiecorns follow-members peerlist",
+        "Or:  indiecorns engage-members like x",
+        "Or:  indiecorns engage-members upvote producthunt",
+      ],
+    }
+  }
+
+  if (!COMMUNITY_ACTION_EVENT_TYPES.includes(eventType)) {
+    return {
+      ok: false,
+      message: "Unknown community action.",
+      hints: ["Try: follow, like, reshare, upvote, or comment"],
+    }
+  }
+  if (
+    targetSourceFilter !== "all" &&
+    !COMMUNITY_TARGET_SOURCES.includes(targetSourceFilter)
+  ) {
+    return {
+      ok: false,
+      message: "Unknown community target source.",
+      hints: ["Try: profiles, posts, or projects"],
+    }
+  }
+
+  const limit = Number.parseInt(flags.limit ?? "", 10)
+  const maxTargets = Number.isFinite(limit) && limit > 0 ? limit : null
+  const targets = []
+
+  for (const platform of platforms) {
+    const targetResult = await getCommunityActionTargetsFromApp({
+      ...flags,
+      platform,
+      type: eventType,
+      "target-source": targetSourceFilter,
+    })
+
+    let apiTargetsAdded = 0
+    const targetResultSource = targetResult?.targetSource ?? null
+    for (const target of targetResult?.targets ?? []) {
+      if (
+        targetSourceFilter !== "all" &&
+        targetResultSource &&
+        targetResultSource !== targetSourceFilter
+      ) {
+        continue
+      }
+      const profileUrl = getPlatformProfileUrl({
+        platform: target.platform,
+        username: target.username,
+        profileUrl: target.profileUrl,
+      })
+      if (!profileUrl) continue
+      targets.push({
+        ...target,
+        profileUrl,
+        eventType,
+        targetSource: targetResult?.targetSource ?? null,
+        recordCommand: getRecordCommand(
+          { ...target, profileUrl },
+          flags,
+          eventType
+        ),
+      })
+      apiTargetsAdded += 1
+    }
+
+    if (
+      apiTargetsAdded > 0 ||
+      requiresProjectTarget(eventType) ||
+      (targetSourceFilter !== "all" && targetSourceFilter !== "profiles")
+    ) {
+      continue
+    }
+
+    const completedTargetKeys = new Set()
+    const events =
+      eventType === "follow"
+        ? null
+        : await getExternalActionEventsFromApp({
+            ...flags,
+            platform,
+            type: eventType,
+          })
+    for (const event of events?.events ?? []) {
+      if (event.event_type !== eventType || event.platform !== platform) {
+        continue
+      }
+      if (event.target_profile_url) {
+        completedTargetKeys.add(
+          `${platform}:${event.target_profile_url.toLowerCase().replace(/\/$/, "")}`
+        )
+      }
+      if (event.target_username) {
+        completedTargetKeys.add(
+          `${platform}:@${event.target_username.toLowerCase()}`
+        )
+      }
+    }
+
+    const result = await getExternalProfilesFromApp({ ...flags, platform })
+    for (const profile of result?.suggestedFollows ?? []) {
+      const profileUrl = getPlatformProfileUrl({
+        platform: profile.platform,
+        username: profile.username,
+        profileUrl: profile.profileUrl,
+      })
+      if (!profileUrl) continue
+      const targetKeys = [
+        `${profile.platform}:${profileUrl.toLowerCase().replace(/\/$/, "")}`,
+        profile.username
+          ? `${profile.platform}:@${profile.username.toLowerCase()}`
+          : null,
+      ].filter(Boolean)
+      if (targetKeys.some((key) => completedTargetKeys.has(key))) {
+        continue
+      }
+      const actionTarget = {
+        ...profile,
+        targetType:
+          eventType === "follow" ? "profile_follow" : "profile_engagement",
+        targetSource: "profiles",
+        profileUrl,
+        eventType,
+      }
+      targets.push({
+        ...actionTarget,
+        recordCommand: getRecordCommand(actionTarget, flags, eventType),
+      })
+    }
+  }
+
+  const seen = new Set()
+  const uniqueTargets = targets
+    .filter((profile) => {
+      const key = `${profile.platform}:${profile.profileUrl.toLowerCase()}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, maxTargets ?? undefined)
+
+  return {
+    ok: true,
+    authenticated: Boolean(getCliAuthHeaders()),
+    eventType,
+    platforms,
+    targetSource: targetSourceFilter,
+    count: uniqueTargets.length,
+    targets: uniqueTargets,
+    targetSources: summarizeCommunityTargetSources(uniqueTargets),
+    setupCommands,
+    afterProofCommands: uniqueTargets
+      .map((target) => target.recordCommand)
+      .filter(Boolean),
+    reporting: getCommunityReportingInfo(flags),
+    reminder:
+      "Open targets and record each action only after it is visible on the external platform.",
+  }
+}
+
+const runCommunityActionTargets = async (
+  flags,
+  eventTypeInput,
+  platformInput
+) => {
+  const output = await collectCommunityActionTargets(
+    flags,
+    eventTypeInput,
+    platformInput
+  )
+
+  if (!output.ok) {
+    console.error(fail(output.message))
+    for (const hint of output.hints) {
+      console.error(hint)
+    }
+    return 1
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.authenticated ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(
+      warn("No authenticated CLI session found. Run: indiecorns login")
+    )
+    return 1
+  }
+
+  if (output.targets.length === 0) {
+    console.log(warn("No Indiecorns member targets are available."))
+    for (const command of output.setupCommands ?? []) {
+      console.log(dim(`Setup: ${command}`))
+    }
+    return 0
+  }
+
+  console.log(
+    color(`Indiecorns member targets to ${output.eventType}`, colors.cyan)
+  )
+  for (const profile of output.targets) {
+    const label =
+      profile.username ?? profile.displayName ?? profile.targetType ?? "target"
+    console.log(`${ok(profile.platform)} ${label} ${profile.profileUrl}`)
+    console.log(`  after ${output.eventType}: ${dim(profile.recordCommand)}`)
+    if (!flags["no-open"]) {
+      openUrl(profile.profileUrl)
+    }
+  }
+
+  if (!flags["no-open"]) {
+    console.log("")
+    console.log(
+      `Record each ${output.eventType} only after it is visible on the platform.`
+    )
+  }
+
+  return 0
+}
+
+const COMMUNITY_PLAN_ACTIONS = [
+  { eventType: "follow", platform: "all" },
+  { eventType: "like", platform: "x" },
+  { eventType: "reshare", platform: "x" },
+  { eventType: "like", platform: "linkedin" },
+  { eventType: "reshare", platform: "linkedin" },
+  { eventType: "comment", platform: "linkedin" },
+  { eventType: "comment", platform: "x" },
+  { eventType: "upvote", platform: "peerlist" },
+  { eventType: "upvote", platform: "producthunt" },
+]
+
+const getCommunitySupportSnapshot = async (flags, options = {}) => {
+  const limit = Number.parseInt(options.limit ?? flags.limit ?? "", 10)
+  const perActionLimit = Number.isFinite(limit) && limit > 0 ? limit : 3
+  const platformFilter = normalizeCommunityPlatform(
+    options.platform ?? flags.platform ?? "all"
+  )
+  const eventTypeFilter = normalizeCommunityEventType(
+    options.eventType ?? flags.type ?? flags.action ?? "all"
+  )
+  const targetSourceFilter = normalizeCommunityTargetSource(
+    options.targetSource ??
+      flags["target-source"] ??
+      flags.targetSource ??
+      "all"
+  )
+  const actions = []
+
+  for (const item of COMMUNITY_PLAN_ACTIONS) {
+    if (eventTypeFilter !== "all" && item.eventType !== eventTypeFilter) {
+      continue
+    }
+    if (
+      platformFilter !== "all" &&
+      item.platform !== "all" &&
+      item.platform !== platformFilter
+    ) {
+      continue
+    }
+
+    const actionPlatform =
+      item.platform === "all" && platformFilter !== "all"
+        ? platformFilter
+        : item.platform
+    const output = await collectCommunityActionTargets(
+      {
+        ...flags,
+        limit: String(perActionLimit),
+        "no-open": true,
+        "target-source": targetSourceFilter,
+      },
+      item.eventType,
+      actionPlatform
+    )
+
+    actions.push(
+      output.ok
+        ? {
+            eventType: output.eventType,
+            platforms: output.platforms,
+            count: output.count,
+            targetSource: output.targetSource,
+            targets: output.targets,
+            targetSources: output.targetSources,
+            setupCommands: output.setupCommands,
+          }
+        : {
+            eventType: item.eventType,
+            platform: actionPlatform,
+            count: 0,
+            targets: [],
+            targetSources: {},
+            setupCommands: getCommunityActionSetupCommands({
+              eventType: item.eventType,
+              platforms: [actionPlatform],
+              flags,
+              targetSource: targetSourceFilter,
+            }),
+            error: output.message,
+          }
+    )
+  }
+
+  const profilePlatforms =
+    platformFilter === "all"
+      ? COMMUNITY_ACTION_PLATFORMS
+      : getCommunityActionPlatforms(platformFilter)
+  const profileInventory = []
+  for (const platform of profilePlatforms) {
+    const result = await getExternalProfilesFromApp({ ...flags, platform })
+    profileInventory.push({
+      platform,
+      profiles: result?.profiles ?? [],
+      suggestedFollows: result?.suggestedFollows ?? [],
+    })
+  }
+
+  const gaps = []
+  for (const action of actions) {
+    if (action.count > 0) continue
+    for (const command of action.setupCommands ?? []) {
+      gaps.push({
+        eventType: action.eventType,
+        platform: action.platform ?? action.platforms?.join(", ") ?? "all",
+        command,
+      })
+    }
+  }
+
+  return {
+    authenticated: Boolean(getCliAuthHeaders()),
+    readOnly: true,
+    platform: platformFilter,
+    eventType: eventTypeFilter,
+    targetSource: targetSourceFilter,
+    count: actions.reduce((total, action) => total + action.count, 0),
+    actions,
+    profileInventory,
+    gaps,
+    reminder:
+      "Open targets and record each action only after it is visible on the external platform.",
+  }
+}
+
+const buildCommunitySupportAssistant = async (flags) => {
+  const [{ Agent, run, setTracingDisabled, tool }, { z }] = await Promise.all([
+    import("@openai/agents"),
+    import("zod"),
+  ])
+  setTracingDisabled(!flags.trace && !flags.tracing)
+
+  const communitySupportOutputSchema = z.object({
+    message: z.string(),
+    priorities: z
+      .array(
+        z.object({
+          eventType: z.enum(COMMUNITY_ACTION_EVENT_TYPES),
+          platform: z.enum(COMMUNITY_ACTION_PLATFORMS),
+          targetLabel: z.string(),
+          targetUrl: z.string(),
+          recordCommand: z.string(),
+          reason: z.string(),
+        })
+      )
+      .max(12),
+    gaps: z
+      .array(
+        z.object({
+          platform: z.string(),
+          eventType: z.string(),
+          command: z.string(),
+          reason: z.string(),
+        })
+      )
+      .max(12),
+    nextCommands: z.array(z.string()).max(8),
+  })
+
+  const getCommunitySupportPlanTool = tool({
+    name: "get_community_support_plan",
+    description:
+      "Return the deterministic Indiecorns community support plan, known profile inventory, setup gaps, target URLs, and record commands.",
+    parameters: z.object({
+      platform: z
+        .enum(["all", ...COMMUNITY_ACTION_PLATFORMS])
+        .optional()
+        .describe("Optional platform filter."),
+      eventType: z
+        .enum(["all", ...COMMUNITY_ACTION_EVENT_TYPES])
+        .optional()
+        .describe("Optional action filter."),
+      limit: z.number().int().positive().max(10).optional(),
+    }),
+    execute: async ({ platform, eventType, limit }) =>
+      getCommunitySupportSnapshot(flags, { platform, eventType, limit }),
+  })
+
+  return {
+    agent: new Agent({
+      name: "Indiecorns community support assistant",
+      instructions: [
+        "You help a user find Indiecorns member profiles and community support targets.",
+        "Always call get_community_support_plan before returning a plan.",
+        "Use only targets, URLs, and record commands returned by the tool.",
+        "Never invent profile URLs or claim an external follow, like, reshare, comment, or upvote was completed.",
+        "Prefer Peerlist, X, LinkedIn, and Product Hunt targets already returned by Indiecorns.",
+        "Keep the response short and operational.",
+      ].join("\n"),
+      tools: [getCommunitySupportPlanTool],
+      outputType: communitySupportOutputSchema,
+    }),
+    run,
+  }
+}
+
+const sanitizeCommunitySupportOutput = (assistantOutput, snapshot, flags) => {
+  const targetsByCommand = new Map()
+  const allowedNextCommands = new Set()
+  for (const action of snapshot.actions ?? []) {
+    for (const target of action.targets ?? []) {
+      if (!target.recordCommand) continue
+      targetsByCommand.set(target.recordCommand, {
+        eventType: action.eventType,
+        platform: target.platform,
+        targetLabel:
+          target.displayName ?? target.username ?? target.targetType ?? "target",
+        targetUrl: target.profileUrl,
+        recordCommand: target.recordCommand,
+      })
+    }
+  }
+
+  const priorities = []
+  for (const priority of assistantOutput?.priorities ?? []) {
+    const target = targetsByCommand.get(priority?.recordCommand)
+    if (!target) continue
+    priorities.push({
+      ...target,
+      reason: priority.reason ?? "Suggested by the support assistant.",
+    })
+  }
+
+  const fallbackTargets = []
+  for (const action of snapshot.actions ?? []) {
+    for (const target of action.targets ?? []) {
+      fallbackTargets.push({
+        eventType: action.eventType,
+        platform: target.platform,
+        targetLabel:
+          target.displayName ?? target.username ?? target.targetType ?? "target",
+        targetUrl: target.profileUrl,
+        recordCommand: target.recordCommand,
+        reason: "Available from the Indiecorns community plan.",
+      })
+    }
+  }
+
+  const setupCommands = new Set(snapshot.gaps.map((gap) => gap.command))
+  for (const command of setupCommands) allowedNextCommands.add(command)
+  const communityPlanCommand = `npx indiecorns community-plan --agent --app-url ${getAppUrl(flags)}`
+  const postListCommand = `npx indiecorns post list all --agent --app-url ${getAppUrl(flags)}`
+  const launchListCommand = `npx indiecorns launch list all --agent --app-url ${getAppUrl(flags)}`
+  allowedNextCommands.add(communityPlanCommand)
+  allowedNextCommands.add(postListCommand)
+  allowedNextCommands.add(launchListCommand)
+  const gaps = []
+  for (const gap of assistantOutput?.gaps ?? []) {
+    if (!setupCommands.has(gap?.command)) continue
+    gaps.push({
+      platform: gap.platform,
+      eventType: gap.eventType,
+      command: gap.command,
+      reason: gap.reason ?? "More saved member data is needed.",
+    })
+  }
+
+  return {
+    message:
+      assistantOutput?.message ??
+      (snapshot.count > 0
+        ? "Community support targets are ready."
+        : "No community support targets are available yet."),
+    priorities: priorities.length ? priorities : fallbackTargets.slice(0, 12),
+    gaps: gaps.length
+      ? gaps
+      : snapshot.gaps.map((gap) => ({
+          ...gap,
+          reason: "Add more member posts, launches, or profiles.",
+        })),
+    afterProofCommands: Array.from(
+      new Set(
+        (priorities.length ? priorities : fallbackTargets)
+          .map((target) => target.recordCommand)
+          .filter(Boolean)
+      )
+    ).slice(0, 12),
+    nextCommands: Array.from(
+      new Set([
+        ...(assistantOutput?.nextCommands ?? []).filter((command) =>
+          allowedNextCommands.has(command)
+        ),
+        communityPlanCommand,
+        postListCommand,
+        launchListCommand,
+      ])
+    ).slice(0, 8),
+  }
+}
+
+const getAfterProofCommandsFromSnapshot = (snapshot, limit = 12) =>
+  Array.from(
+    new Set(
+      (snapshot.actions ?? [])
+        .flatMap((action) => action.targets ?? [])
+        .map((target) => target.recordCommand)
+        .filter(Boolean)
+    )
+  ).slice(0, limit)
+
+const getCommunityActionTargetLabel = (target) =>
+  target?.displayName ?? target?.username ?? target?.targetType ?? "target"
+
+const getCommunityQueueTargetsFromSnapshot = (snapshot, limit = 25) => {
+  const maxTargets = Math.max(1, limit)
+  const actionQueues = (snapshot.actions ?? [])
+    .map((action) => ({
+      action,
+      targets: (action.targets ?? [])
+        .filter((target) => target?.profileUrl)
+        .map((target) => ({
+          eventType: action.eventType,
+          platform: target.platform,
+          targetType: target.targetType,
+          targetSource: target.targetSource,
+          targetLabel: getCommunityActionTargetLabel(target),
+          targetUrl: target.profileUrl,
+          username: target.username,
+          displayName: target.displayName,
+          recordCommand: target.recordCommand,
+        })),
+    }))
+    .filter((queue) => queue.targets.length > 0)
+
+  const targets = []
+  let offset = 0
+  while (targets.length < maxTargets) {
+    let addedInRound = false
+    for (const queue of actionQueues) {
+      const target = queue.targets[offset]
+      if (!target) continue
+      targets.push(target)
+      addedInRound = true
+      if (targets.length >= maxTargets) break
+    }
+    if (!addedInRound) break
+    offset += 1
+  }
+
+  return targets.map((target, index) => {
+    const normalizedUrl = String(target.targetUrl ?? "")
+      .toLowerCase()
+      .replace(/\/$/, "")
+    const queueKey = [
+      target.eventType,
+      target.platform,
+      target.targetSource ?? "unknown",
+      target.targetType ?? "unknown",
+      normalizedUrl,
+    ].join(":")
+    return {
+      ...target,
+      queuePosition: index + 1,
+      queueKey,
+      recordCommand: `${target.recordCommand} --queue-key ${shellQuote(queueKey)}`,
+    }
+  })
+}
+
+const summarizeCommunityQueueTargets = (targets = []) =>
+  targets.reduce(
+    (summary, target) => {
+      summary.byEventType[target.eventType] =
+        (summary.byEventType[target.eventType] ?? 0) + 1
+      summary.byPlatform[target.platform] =
+        (summary.byPlatform[target.platform] ?? 0) + 1
+      const source = target.targetSource ?? "unknown"
+      summary.byTargetSource[source] = (summary.byTargetSource[source] ?? 0) + 1
+      return summary
+    },
+    {
+      byEventType: {},
+      byPlatform: {},
+      byTargetSource: {},
+    }
+  )
+
+const runCommunitySupportAssistant = async (flags, promptParts) => {
+  const request = promptParts.join(" ").trim()
+  const snapshot = await getCommunitySupportSnapshot(flags)
+
+  if (!ensureOpenAiApiKey()) {
+    const output = {
+      ok: false,
+      message:
+        "OPENAI_API_KEY is required for the support assistant. Deterministic support planning still works with: npx indiecorns community-plan --agent",
+      supportPlan: snapshot,
+      priorities: [],
+      gaps: snapshot.gaps,
+      afterProofCommands: getAfterProofCommandsFromSnapshot(snapshot),
+      nextCommands: [
+        `npx indiecorns community-plan --agent --app-url ${getAppUrl(flags)}`,
+        `npx indiecorns post list all --agent --app-url ${getAppUrl(flags)}`,
+        `npx indiecorns launch list all --agent --app-url ${getAppUrl(flags)}`,
+      ],
+      reporting: getCommunityReportingInfo(flags),
+    }
+    if (flags.json || flags.agent) printJson(output)
+    else console.log(warn(output.message))
+    return 1
+  }
+
+  const { agent, run } = await buildCommunitySupportAssistant(flags)
+  let result
+  try {
+    result = await run(
+      agent,
+      [
+        request
+          ? `User request: ${request}`
+          : "User wants a daily Indiecorns community support plan.",
+        `App URL: ${getAppUrl(flags)}`,
+        `Authenticated CLI: ${Boolean(getCliAuthHeaders())}`,
+        `Current deterministic snapshot: ${summarizeForAgent(snapshot)}`,
+        "Return priorities only from get_community_support_plan tool results.",
+      ].join("\n"),
+      { maxTurns: 5 }
+    )
+  } catch (error) {
+    const output = {
+      ok: false,
+      message:
+        error instanceof Error
+          ? `Support assistant failed: ${error.message}`
+          : "Support assistant failed.",
+      supportPlan: snapshot,
+      priorities: [],
+      gaps: snapshot.gaps,
+      afterProofCommands: getAfterProofCommandsFromSnapshot(snapshot),
+      nextCommands: [
+        `npx indiecorns community-plan --agent --app-url ${getAppUrl(flags)}`,
+        `npx indiecorns post list all --agent --app-url ${getAppUrl(flags)}`,
+        `npx indiecorns launch list all --agent --app-url ${getAppUrl(flags)}`,
+      ],
+      reporting: getCommunityReportingInfo(flags),
+    }
+    if (flags.json || flags.agent) printJson(output)
+    else console.log(warn(output.message))
+    return 1
+  }
+
+  const planned = sanitizeCommunitySupportOutput(
+    result.finalOutput,
+    snapshot,
+    flags
+  )
+  const output = {
+    ok: true,
+    authenticated: snapshot.authenticated,
+    readOnly: true,
+    message: planned.message,
+    priorities: planned.priorities,
+    gaps: planned.gaps,
+    afterProofCommands: planned.afterProofCommands,
+    nextCommands: planned.nextCommands,
+    reporting: getCommunityReportingInfo(flags),
+    supportPlan: snapshot,
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return snapshot.authenticated ? 0 : 1
+  }
+
+  if (!snapshot.authenticated) {
+    console.log(warn("No authenticated CLI session found. Run: indiecorns login"))
+    return 1
+  }
+
+  console.log(color("Indiecorns support assistant", colors.cyan))
+  if (planned.message) console.log(planned.message)
+  for (const item of planned.priorities) {
+    console.log(`  ${ok(item.eventType)} ${item.targetLabel}: ${item.targetUrl}`)
+    console.log(`    record after proof: ${dim(item.recordCommand)}`)
+  }
+  if (planned.gaps.length > 0) {
+    console.log("")
+    console.log(color("Needs more data", colors.cyan))
+    for (const gap of planned.gaps) {
+      console.log(`  ${dim(gap.command)}`)
+    }
+  }
+  console.log("")
+  console.log(dim(snapshot.reminder))
+  return 0
+}
+
+const runCommunityQueue = async (flags, args = [], options = {}) => {
+  const shouldOpenTargets = Boolean(options.openTargets)
+  const limit = Number.parseInt(flags.limit ?? "", 10)
+  const targetLimit = Number.isFinite(limit) && limit > 0 ? limit : 25
+  const afterKey = flags["after-key"] ?? flags.after ?? flags.cursor ?? null
+  const snapshotLimit = afterKey ? Math.max(targetLimit * 5, 100) : targetLimit
+  const platform = normalizeCommunityPlatform(
+    args[0] ?? flags.platform ?? "all"
+  )
+  const eventType = normalizeCommunityEventType(
+    flags.type ?? flags.action ?? "all"
+  )
+  const targetSource = normalizeCommunityTargetSource(
+    flags["target-source"] ?? flags.targetSource ?? "all"
+  )
+  const snapshot = await getCommunitySupportSnapshot(flags, {
+    platform,
+    eventType,
+    targetSource,
+    limit: snapshotLimit,
+  })
+  const fullQueue = getCommunityQueueTargetsFromSnapshot(snapshot, snapshotLimit)
+  const afterIndex = afterKey
+    ? fullQueue.findIndex((target) => target.queueKey === afterKey)
+    : -1
+  const skippedCount = afterIndex >= 0 ? afterIndex + 1 : 0
+  const targets = fullQueue.slice(skippedCount, skippedCount + targetLimit)
+  const nextCursor = targets.at(-1)?.queueKey ?? null
+  const output = {
+    authenticated: snapshot.authenticated,
+    readOnly: true,
+    platform: snapshot.platform,
+    eventType: snapshot.eventType,
+    targetSource: snapshot.targetSource,
+    count: targets.length,
+    availableCount: fullQueue.length,
+    skippedCount,
+    afterKey,
+    afterKeyFound: afterKey ? afterIndex >= 0 : null,
+    nextCursor,
+    targets,
+    summary: summarizeCommunityQueueTargets(targets),
+    actions: (snapshot.actions ?? []).map((action) => ({
+      eventType: action.eventType,
+      platforms: action.platforms ?? [action.platform].filter(Boolean),
+      targetCount: action.count,
+      targetSources:
+        action.targetSources ?? summarizeCommunityTargetSources(action.targets),
+    })),
+    gaps: snapshot.gaps,
+    setupCommands: Array.from(
+      new Set(snapshot.gaps.map((gap) => gap.command))
+    ),
+    afterProofCommands: targets
+      .map((target) => target.recordCommand)
+      .filter(Boolean),
+    nextCommands: [
+      `npx indiecorns community-next --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns community-status --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns events --agent --app-url ${getAppUrl(flags)}`,
+    ],
+    reporting: getCommunityReportingInfo(flags),
+    opensTargets: shouldOpenTargets && !flags["no-open"],
+    reminder: snapshot.reminder,
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.authenticated ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(warn("No authenticated CLI session found. Run: indiecorns login"))
+    return 1
+  }
+
+  if (targets.length === 0) {
+    console.log(warn("No community action targets are available."))
+    for (const command of output.setupCommands) {
+      console.log(dim(`Setup: ${command}`))
+    }
+    return 0
+  }
+
+  console.log(color("Indiecorns community action queue", colors.cyan))
+  for (const target of targets) {
+    console.log(`${ok(target.eventType)} ${target.platform} ${target.targetLabel}`)
+    console.log(`  ${target.targetUrl}`)
+    console.log(`  record after proof: ${dim(target.recordCommand)}`)
+    if (shouldOpenTargets && !flags["no-open"]) {
+      openUrl(target.targetUrl)
+    }
+  }
+  console.log("")
+  console.log(dim(output.reminder))
+  return 0
+}
+
+const runCommunityNext = async (flags, args = []) => {
+  const limit = Number.parseInt(flags.limit ?? "", 10)
+  const targetLimit = Number.isFinite(limit) && limit > 0 ? limit : 1
+  const platform = normalizeCommunityPlatform(
+    args[0] ?? flags.platform ?? "all"
+  )
+  const eventType = normalizeCommunityEventType(
+    flags.type ?? flags.action ?? "all"
+  )
+  const targetSource = normalizeCommunityTargetSource(
+    flags["target-source"] ?? flags.targetSource ?? "all"
+  )
+  const snapshot = await getCommunitySupportSnapshot(flags, {
+    platform,
+    eventType,
+    targetSource,
+    limit: targetLimit,
+  })
+  const targets = getCommunityQueueTargetsFromSnapshot(snapshot, targetLimit)
+  const output = {
+    authenticated: snapshot.authenticated,
+    readOnly: true,
+    platform: snapshot.platform,
+    eventType: snapshot.eventType,
+    targetSource: snapshot.targetSource,
+    count: targets.length,
+    target: targets[0] ?? null,
+    targets,
+    gaps: snapshot.gaps,
+    setupCommands: Array.from(
+      new Set(snapshot.gaps.map((gap) => gap.command))
+    ),
+    afterProofCommands: targets
+      .map((target) => target.recordCommand)
+      .filter(Boolean),
+    nextCommands: [
+      `npx indiecorns community-next --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns community-status --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns events --agent --app-url ${getAppUrl(flags)}`,
+    ],
+    reporting: getCommunityReportingInfo(flags),
+    reminder: snapshot.reminder,
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.authenticated ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(warn("No authenticated CLI session found. Run: indiecorns login"))
+    return 1
+  }
+
+  if (targets.length === 0) {
+    console.log(warn("No community action target is available."))
+    for (const command of output.setupCommands) {
+      console.log(dim(`Setup: ${command}`))
+    }
+    return 0
+  }
+
+  console.log(color("Next Indiecorns community action", colors.cyan))
+  for (const target of targets) {
+    console.log(`${ok(target.eventType)} ${target.platform} ${target.targetLabel}`)
+    console.log(`  ${target.targetUrl}`)
+    console.log(`  record after proof: ${dim(target.recordCommand)}`)
+    if (!flags["no-open"]) {
+      openUrl(target.targetUrl)
+    }
+  }
+  console.log("")
+  console.log(dim(output.reminder))
+  return 0
+}
+
+const runCommunityActionPlan = async (flags, args = []) => {
+  const limit = Number.parseInt(flags.limit ?? "", 10)
+  const perActionLimit = Number.isFinite(limit) && limit > 0 ? limit : 3
+  const platformFilter = normalizeCommunityPlatform(
+    args[0] ?? flags.platform ?? "all"
+  )
+  const actionFilter = normalizeCommunityEventType(
+    flags.type ?? flags.action ?? "all"
+  )
+  const targetSourceFilter = normalizeCommunityTargetSource(
+    flags["target-source"] ?? flags.targetSource ?? "all"
+  )
+  const actions = []
+
+  for (const item of COMMUNITY_PLAN_ACTIONS) {
+    if (actionFilter !== "all" && item.eventType !== actionFilter) {
+      continue
+    }
+    if (
+      platformFilter !== "all" &&
+      item.platform !== "all" &&
+      item.platform !== platformFilter
+    ) {
+      continue
+    }
+
+    const actionPlatform =
+      item.platform === "all" && platformFilter !== "all"
+        ? platformFilter
+        : item.platform
+    const output = await collectCommunityActionTargets(
+      {
+        ...flags,
+        limit: String(perActionLimit),
+        "no-open": true,
+        "target-source": targetSourceFilter,
+      },
+      item.eventType,
+      actionPlatform
+    )
+    if (!output.ok) {
+      actions.push({
+        eventType: item.eventType,
+        platform: actionPlatform,
+        count: 0,
+        targets: [],
+        targetSources: {},
+        setupCommands: getCommunityActionSetupCommands({
+          eventType: item.eventType,
+          platforms: [actionPlatform],
+          flags,
+          targetSource: targetSourceFilter,
+        }),
+        error: output.message,
+      })
+      continue
+    }
+
+    actions.push({
+      eventType: output.eventType,
+      platforms: output.platforms,
+      count: output.count,
+      targetSource: output.targetSource,
+      targets: output.targets,
+      targetSources: output.targetSources,
+      setupCommands: output.setupCommands,
+    })
+  }
+
+  const output = {
+    authenticated: Boolean(getCliAuthHeaders()),
+    readOnly: true,
+    platform: platformFilter,
+    eventType: actionFilter,
+    targetSource: targetSourceFilter,
+    count: actions.reduce((total, action) => total + action.count, 0),
+    actions,
+    setupCommands: Array.from(
+      new Set(actions.flatMap((action) => action.setupCommands ?? []))
+    ),
+    afterProofCommands: getAfterProofCommandsFromSnapshot({ actions }),
+    nextCommands: [
+      `npx indiecorns events --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns post list all --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns launch list all --agent --app-url ${getAppUrl(flags)}`,
+    ],
+    reporting: getCommunityReportingInfo(flags),
+    reminder:
+      "Open targets and record each action only after it is visible on the external platform.",
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.authenticated ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(
+      warn("No authenticated CLI session found. Run: indiecorns login")
+    )
+    return 1
+  }
+
+  console.log(color("Indiecorns community action plan", colors.cyan))
+  for (const action of actions) {
+    console.log("")
+    console.log(
+      `${ok(action.eventType)} ${action.platforms?.join(", ") ?? action.platform} (${action.count})`
+    )
+    for (const target of action.targets.slice(0, perActionLimit)) {
+      const label =
+        target.displayName ?? target.username ?? target.targetType ?? "target"
+      console.log(`  ${label}: ${target.profileUrl}`)
+      console.log(`    after ${action.eventType}: ${dim(target.recordCommand)}`)
+    }
+    if (action.count === 0) {
+      for (const command of action.setupCommands ?? []) {
+        console.log(`  ${dim(`setup: ${command}`)}`)
+      }
+    }
+  }
+  console.log("")
+  console.log(dim(output.reminder))
+  return 0
+}
+
+const runCommunityStatus = async (flags) => {
+  const snapshot = await getCommunitySupportSnapshot(flags)
+  const [eventsResult, postsResult, launchesResult] = await Promise.all([
+    getExternalActionEventsFromApp({
+      ...flags,
+      limit: flags["event-limit"] ?? "100",
+    }),
+    getCommunityPostsFromApp({ flags, platform: "all" }),
+    getCommunityLaunchesFromApp({ flags, platform: "all" }),
+  ])
+  const events = eventsResult?.events ?? []
+  const posts = postsResult?.posts ?? []
+  const launches = launchesResult?.launches ?? []
+  const actions = snapshot.actions ?? []
+  const actionSummary = actions.map((action) => ({
+    eventType: action.eventType,
+    platforms: action.platforms ?? [action.platform].filter(Boolean),
+    targetCount: action.count,
+    setupCommandCount: action.setupCommands?.length ?? 0,
+    targetSources:
+      action.targetSources ?? summarizeCommunityTargetSources(action.targets),
+  }))
+  const output = {
+    authenticated: Boolean(getCliAuthHeaders()),
+    readOnly: true,
+    summary: {
+      pendingTargetCount: snapshot.count,
+      recordedEventCount: events.length,
+      savedPostCount: posts.length,
+      savedLaunchCount: launches.length,
+      setupGapCount: snapshot.gaps.length,
+      afterProofCommandCount: getAfterProofCommandsFromSnapshot(snapshot).length,
+    },
+    actions: actionSummary,
+    recorded: summarizeExternalActionEvents(events),
+    savedTargets: {
+      posts: posts.map((post) => ({
+        platform: post.platform,
+        url: post.post_url,
+        title: post.title,
+        status: post.status,
+      })),
+      launches: launches.map((launch) => ({
+        platform: String(launch.source ?? "").replace(/_launch$/, ""),
+        url: launch.launch_url,
+        name: launch.name,
+        status: launch.status,
+      })),
+    },
+    gaps: snapshot.gaps,
+    setupCommands: Array.from(
+      new Set(actions.flatMap((action) => action.setupCommands ?? []))
+    ),
+    afterProofCommands: getAfterProofCommandsFromSnapshot(snapshot),
+    nextCommands: [
+      `npx indiecorns community-plan --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns events --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns post list all --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns launch list all --agent --app-url ${getAppUrl(flags)}`,
+    ],
+    reporting: getCommunityReportingInfo(flags),
+    reminder: snapshot.reminder,
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.authenticated ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(warn("No authenticated CLI session found. Run: indiecorns login"))
+    return 1
+  }
+
+  console.log(color("Indiecorns community status", colors.cyan))
+  console.log(`${ok("pending targets")} ${output.summary.pendingTargetCount}`)
+  console.log(`${ok("recorded events")} ${output.summary.recordedEventCount}`)
+  console.log(`${ok("saved posts")} ${output.summary.savedPostCount}`)
+  console.log(`${ok("saved launches")} ${output.summary.savedLaunchCount}`)
+  if (output.gaps.length > 0) {
+    console.log("")
+    console.log(color("Setup gaps", colors.cyan))
+    for (const gap of output.gaps) {
+      console.log(`  ${dim(gap.command)}`)
+    }
+  }
+  console.log("")
+  console.log(dim(`Dashboard: ${output.reporting.dashboard.activityUrl}`))
+  console.log(dim(output.reminder))
+  return 0
+}
+
+const runFollowMembers = async (flags, platformInput) =>
+  runCommunityActionTargets(flags, "follow", platformInput)
+
+const runEngageMembers = async (flags, eventTypeInput, platformInput) =>
+  runCommunityActionTargets(flags, eventTypeInput, platformInput)
+
 const runProfile = async (flags, args) => {
   const subcommand = args[0] ?? "show"
   if (
@@ -2353,7 +4740,9 @@ const runProfile = async (flags, args) => {
   if (subcommand !== "set" && subcommand !== "add") {
     console.error(fail(`Unknown profile command: ${subcommand}`))
     console.error("Try: indiecorns profile set peerlist --username <username>")
-    console.error("Or:  indiecorns profile set website --profile-url <url>")
+    console.error(
+      "Or:  indiecorns profile set website --profile-url https://your-site.com"
+    )
     return 1
   }
 
@@ -2392,13 +4781,248 @@ const runProfile = async (flags, args) => {
     return 1
   }
 
-  console.log(ok(`Saved ${platform} username @${output.profile?.username}.`))
+  if (platform === "website") {
+    console.log(ok(`Saved website ${output.profile?.username}.`))
+    console.log("Next: indiecorns join slack")
+  } else {
+    console.log(ok(`Saved ${platform} username @${output.profile?.username}.`))
+  }
   if (output.profile?.profileUrl) {
     console.log(dim(output.profile.profileUrl))
   }
   if (output.resolution?.method && output.resolution.method !== "direct") {
     console.log(dim(`Resolved via ${output.resolution.method}.`))
   }
+  return 0
+}
+
+const runLaunch = async (flags, args) => {
+  const subcommand = args[0] ?? "set"
+  if (subcommand === "list" || subcommand === "show") {
+    const platform = normalizeCommunityPlatform(
+      args[1] ?? flags.platform ?? "all"
+    )
+    if (
+      platform !== "all" &&
+      platform !== "producthunt" &&
+      platform !== "peerlist"
+    ) {
+      console.error(fail(`Unknown launch platform: ${platform}`))
+      console.error("Try: indiecorns launch list producthunt")
+      console.error("Or:  indiecorns launch list all")
+      return 1
+    }
+
+    const result = await getCommunityLaunchesFromApp({ flags, platform })
+    const output = {
+      authenticated: Boolean(getCliAuthHeaders()),
+      platform,
+      launches: result?.launches ?? [],
+      count: result?.launches?.length ?? 0,
+      message: result?.message,
+      nextCommand:
+        platform === "all"
+          ? `npx indiecorns community-plan --type upvote --agent --app-url ${getAppUrl(flags)}`
+          : `npx indiecorns upvote-members ${platform} --agent --app-url ${getAppUrl(flags)}`,
+    }
+
+    if (flags.json || flags.agent) {
+      printJson(output)
+      return output.authenticated && !output.message ? 0 : 1
+    }
+
+    if (!output.authenticated) {
+      console.log(
+        warn("No authenticated CLI session found. Run: indiecorns login")
+      )
+      return 1
+    }
+    if (output.message) {
+      console.log(warn(output.message))
+      return 1
+    }
+    if (output.launches.length === 0) {
+      console.log(warn("No saved community launches."))
+      console.log(
+        dim("Setup: indiecorns launch set producthunt --url <url> --name <name>")
+      )
+      return 0
+    }
+
+    console.log(color("Saved community launches", colors.cyan))
+    for (const launch of output.launches) {
+      console.log(`${ok(launch.source?.replace(/_launch$/, "") ?? platform)} ${launch.name}`)
+      console.log(`  ${dim(launch.launch_url)}`)
+    }
+    console.log(dim(`Next: ${output.nextCommand}`))
+    return 0
+  }
+
+  if (subcommand !== "set" && subcommand !== "add") {
+    console.error(fail(`Unknown launch command: ${subcommand}`))
+    console.error(
+      "Try: indiecorns launch set producthunt --url https://www.producthunt.com/..."
+    )
+    return 1
+  }
+
+  const platform = normalizeCommunityPlatform(
+    args[1] ?? flags.platform ?? "producthunt"
+  )
+  if (platform !== "producthunt" && platform !== "peerlist") {
+    console.error(fail(`Unknown launch platform: ${platform}`))
+    console.error("Try: indiecorns launch set producthunt --url <url>")
+    console.error("Or:  indiecorns launch set peerlist --url <url>")
+    return 1
+  }
+
+  const savedLaunch = await saveCommunityLaunchToApp({ flags, platform })
+  const output = {
+    authenticated: Boolean(getCliAuthHeaders()),
+    saved: Boolean(savedLaunch?.saved),
+    launch: savedLaunch?.launch,
+    message: savedLaunch?.message,
+    nextCommand: `npx indiecorns upvote-members ${platform} --agent --app-url ${getAppUrl(flags)}`,
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.saved ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(
+      warn("No authenticated CLI session found. Run: indiecorns login")
+    )
+    return 1
+  }
+
+  if (!output.saved) {
+    console.log(warn(output.message ?? "Launch was not saved."))
+    return 1
+  }
+
+  console.log(ok(`Saved ${platform} launch ${output.launch?.name}.`))
+  if (output.launch?.launch_url) {
+    console.log(dim(output.launch.launch_url))
+  }
+  console.log(dim(`Next: ${output.nextCommand}`))
+  return 0
+}
+
+const runPost = async (flags, args) => {
+  const subcommand = args[0] ?? "set"
+  if (subcommand === "list" || subcommand === "show") {
+    const platform = normalizeCommunityPlatform(args[1] ?? flags.platform ?? "all")
+    if (platform !== "all" && platform !== "x" && platform !== "linkedin") {
+      console.error(fail(`Unknown post platform: ${platform}`))
+      console.error("Try: indiecorns post list x")
+      console.error("Or:  indiecorns post list all")
+      return 1
+    }
+
+    const result = await getCommunityPostsFromApp({ flags, platform })
+    const output = {
+      authenticated: Boolean(getCliAuthHeaders()),
+      platform,
+      posts: result?.posts ?? [],
+      count: result?.posts?.length ?? 0,
+      message: result?.message,
+      nextCommands:
+        platform === "all"
+          ? [
+              `npx indiecorns community-plan --type like --agent --app-url ${getAppUrl(flags)}`,
+              `npx indiecorns community-plan --type reshare --agent --app-url ${getAppUrl(flags)}`,
+              `npx indiecorns community-plan --type comment --agent --app-url ${getAppUrl(flags)}`,
+            ]
+          : [
+              `npx indiecorns engage-members like ${platform} --agent --app-url ${getAppUrl(flags)}`,
+              `npx indiecorns engage-members reshare ${platform} --agent --app-url ${getAppUrl(flags)}`,
+              `npx indiecorns engage-members comment ${platform} --agent --app-url ${getAppUrl(flags)}`,
+            ],
+    }
+
+    if (flags.json || flags.agent) {
+      printJson(output)
+      return output.authenticated && !output.message ? 0 : 1
+    }
+
+    if (!output.authenticated) {
+      console.log(
+        warn("No authenticated CLI session found. Run: indiecorns login")
+      )
+      return 1
+    }
+    if (output.message) {
+      console.log(warn(output.message))
+      return 1
+    }
+    if (output.posts.length === 0) {
+      console.log(warn("No saved community posts."))
+      console.log(dim("Setup: indiecorns post set x --url <url> --title <title>"))
+      return 0
+    }
+
+    console.log(color("Saved community posts", colors.cyan))
+    for (const post of output.posts) {
+      console.log(`${ok(post.platform)} ${post.title ?? post.author_username ?? "post"}`)
+      console.log(`  ${dim(post.post_url)}`)
+    }
+    console.log(dim(`Next: ${output.nextCommands[0]}`))
+    return 0
+  }
+
+  if (subcommand !== "set" && subcommand !== "add") {
+    console.error(fail(`Unknown post command: ${subcommand}`))
+    console.error(
+      "Try: indiecorns post set x --url https://x.com/.../status/..."
+    )
+    return 1
+  }
+
+  const platform = normalizeCommunityPlatform(args[1] ?? flags.platform ?? "x")
+  if (platform !== "x" && platform !== "linkedin") {
+    console.error(fail(`Unknown post platform: ${platform}`))
+    console.error("Try: indiecorns post set x --url <url>")
+    console.error("Or:  indiecorns post set linkedin --url <url>")
+    return 1
+  }
+
+  const savedPost = await saveCommunityPostToApp({ flags, platform })
+  const output = {
+    authenticated: Boolean(getCliAuthHeaders()),
+    saved: Boolean(savedPost?.saved),
+    post: savedPost?.post,
+    message: savedPost?.message,
+    nextCommands: [
+      `npx indiecorns engage-members like ${platform} --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns engage-members reshare ${platform} --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns engage-members comment ${platform} --agent --app-url ${getAppUrl(flags)}`,
+    ],
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.saved ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(
+      warn("No authenticated CLI session found. Run: indiecorns login")
+    )
+    return 1
+  }
+
+  if (!output.saved) {
+    console.log(warn(output.message ?? "Post was not saved."))
+    return 1
+  }
+
+  console.log(ok(`Saved ${platform} post ${output.post?.title}.`))
+  if (output.post?.post_url) {
+    console.log(dim(output.post.post_url))
+  }
+  console.log(dim(`Next: ${output.nextCommands[0]}`))
   return 0
 }
 
@@ -2444,11 +5068,13 @@ const runExtensionOpen = async (flags) => {
     extensionId: getExtensionId(flags),
     extensionUrl,
     runNext: Boolean(flags["run-next"]),
-    nextAction: agentPlan.actions.find(
-      (action) => action.id === agentPlan.desktopAutomation?.nextActionId
-    ) ?? agentPlan.nextAction ?? null,
-    note:
-      "The Indiecorns Chrome extension runs safe browser-assisted tasks and records proof after observed completion.",
+    nextAction:
+      agentPlan.actions.find(
+        (action) => action.id === agentPlan.desktopAutomation?.nextActionId
+      ) ??
+      agentPlan.nextAction ??
+      null,
+    note: "The Indiecorns Chrome extension runs safe browser-assisted tasks and records proof after observed completion.",
   }
 
   if (flags.json || flags.agent) {
@@ -2599,7 +5225,8 @@ const installPluginBundle = () => {
     }
   }
 
-  const { pluginRoot, marketplacePath, skillsRoot } = getHomePluginInstallPaths()
+  const { pluginRoot, marketplacePath, skillsRoot } =
+    getHomePluginInstallPaths()
   rmSync(pluginRoot, { recursive: true, force: true })
   mkdirSync(dirname(pluginRoot), { recursive: true })
   cpSync(bundledPluginRoot, pluginRoot, { recursive: true })
@@ -2730,6 +5357,21 @@ const getWizardReport = async (flags) => {
       run: `npx indiecorns run --app-url ${appUrl}`,
       agent: `npx indiecorns agent --app-url ${appUrl}`,
       dashboard: `npx indiecorns dashboard --app-url ${appUrl}`,
+      followMembers: `npx indiecorns follow-members all --agent --app-url ${appUrl}`,
+      communityQueue: `npx indiecorns community-queue --agent --app-url ${appUrl}`,
+      communityOpen: `npx indiecorns community-open --limit 5 --app-url ${appUrl}`,
+      communityPlan: `npx indiecorns community-plan --agent --app-url ${appUrl}`,
+      communityNext: `npx indiecorns community-next --agent --app-url ${appUrl}`,
+      communityStatus: `npx indiecorns community-status --agent --app-url ${appUrl}`,
+      likeXMembers: `npx indiecorns engage-members like x --agent --app-url ${appUrl}`,
+      reshareXMembers: `npx indiecorns engage-members reshare x --agent --app-url ${appUrl}`,
+      likeLinkedInMembers: `npx indiecorns engage-members like linkedin --agent --app-url ${appUrl}`,
+      reshareLinkedInMembers: `npx indiecorns engage-members reshare linkedin --agent --app-url ${appUrl}`,
+      commentLinkedInMembers: `npx indiecorns engage-members comment linkedin --agent --app-url ${appUrl}`,
+      commentXMembers: `npx indiecorns engage-members comment x --agent --app-url ${appUrl}`,
+      listCommunityPosts: `npx indiecorns post list all --agent --app-url ${appUrl}`,
+      listCommunityLaunches: `npx indiecorns launch list all --agent --app-url ${appUrl}`,
+      upvoteProductHuntMembers: `npx indiecorns upvote-members producthunt --agent --app-url ${appUrl}`,
       pluginInstall: "npx indiecorns plugin install",
     },
     agentPlan,
@@ -2797,6 +5439,15 @@ const runWizard = async (flags) => {
     () => getWizardReport(flags),
     ok("Setup check complete.")
   )
+  const quickStartActions = QUICK_START_ACTION_IDS.map((actionId) =>
+    report.agentPlan.actions.find((action) => action.id === actionId)
+  ).filter(Boolean)
+  const nextQuickStartAction = quickStartActions.find(
+    (action) => action.status !== "completed"
+  )
+  const completedQuickStart = quickStartActions.filter(
+    (action) => action.status === "completed"
+  ).length
 
   printBrandHeader(`setup v${getCliVersion()}`)
   section("Your setup")
@@ -2815,7 +5466,7 @@ const runWizard = async (flags) => {
     }`
   )
   console.log(
-    `${ok("Progress")} ${report.onboarding.completed}/${report.onboarding.total} actions done, ${report.onboarding.creditsEarned}/${report.onboarding.creditsAvailable} credits earned`
+    `${ok("Quick start")} ${completedQuickStart}/${quickStartActions.length} complete`
   )
 
   const setupIssues = report.setup.rows.filter((row) => row.status !== "ok")
@@ -2828,7 +5479,9 @@ const runWizard = async (flags) => {
   if (!report.authenticated) {
     section("Next step")
     console.log(`  ${ok(report.commands.login)}`)
-    console.log("  Sign in once to connect this CLI to your Indiecorns account.")
+    console.log(
+      "  Sign in once to connect this CLI to your Indiecorns account."
+    )
 
     if (process.stdout.isTTY && !flags["no-open"]) {
       console.log("")
@@ -2845,24 +5498,19 @@ const runWizard = async (flags) => {
   if (!report.plugin.installed || !report.plugin.skillsInstalled) {
     section("Next step")
     console.log(`  ${ok(report.commands.pluginInstall)}`)
-    console.log("  Install the local plugin and skill so agents can use Indiecorns.")
+    console.log(
+      "  Install the local plugin and skill so agents can use Indiecorns."
+    )
     return 0
   }
 
   section("Next step")
-  if (report.onboarding.pending > 0) {
-    console.log(`  ${ok(report.commands.tasks)}`)
-    console.log(
-      `  You have ${report.onboarding.pending} onboarding action${
-        report.onboarding.pending === 1 ? "" : "s"
-      } left. This shows what to do next.`
-    )
-    console.log("")
-    console.log(`To let the CLI open each task for you, run:`)
-    console.log(`  ${dim(report.commands.run)}`)
+  if (nextQuickStartAction) {
+    console.log(`  ${ok(nextQuickStartAction.agentCommand)}`)
+    console.log(`  ${nextQuickStartAction.title}`)
   } else {
     console.log(`  ${ok(report.commands.dashboard)}`)
-    console.log("  All onboarding actions are complete.")
+    console.log("  Setup complete. Optional community actions are in the dashboard.")
   }
   return 0
 }
@@ -2878,7 +5526,28 @@ const main = async () => {
     case "collective":
     case "init":
     case "setup":
+      if (["ai", "assist", "agent"].includes(args[0])) {
+        const promptParts = args.slice(1)
+        if (isCommunitySupportRequest(promptParts)) {
+          return runCommunitySupportAssistant(flags, promptParts)
+        }
+        return runSetupAssistant(flags, promptParts)
+      }
       return runWizard(flags)
+    case "assist":
+    case "assistant":
+      if (isCommunitySupportRequest(args)) {
+        return runCommunitySupportAssistant(flags, args)
+      }
+      return runSetupAssistant(flags, args)
+    case "support-assist":
+    case "support-assistant":
+    case "community-assist":
+    case "community-assistant":
+      return runCommunitySupportAssistant(flags, args)
+    case "setup-assist":
+    case "setup-assistant":
+      return runSetupAssistant(flags, args)
     case "auth": {
       const subcommand = args[0] ?? "login"
       if (subcommand === "login") {
@@ -2908,7 +5577,109 @@ const main = async () => {
     case "onboarding":
       return runTasks(flags)
     case "follow":
+      if (
+        args[0] === "members" ||
+        args[0] === "member" ||
+        args[0] === "makers" ||
+        args[0] === "maker"
+      ) {
+        return runFollowMembers(flags, args[1] ?? flags.platform ?? "all")
+      }
       return runFollow(flags, args[0])
+    case "follow-members":
+    case "follow-member":
+    case "follow-makers":
+    case "follow-maker":
+      return runFollowMembers(flags, args[0] ?? flags.platform ?? "all")
+    case "community-plan":
+    case "community-action-plan":
+    case "action-plan":
+    case "support-members":
+    case "support-makers":
+      return runCommunityActionPlan(flags, args)
+    case "community-queue":
+    case "action-queue":
+    case "support-queue":
+      return runCommunityQueue(flags, args)
+    case "community-open":
+    case "open-community":
+    case "open-queue":
+    case "support-open":
+      return runCommunityQueue(flags, args, { openTargets: true })
+    case "community-next":
+    case "next-community-action":
+    case "next-action":
+    case "support-next":
+      return runCommunityNext(flags, args)
+    case "community-status":
+    case "support-status":
+    case "activity-status":
+      return runCommunityStatus(flags)
+    case "engage-members":
+    case "engage-member":
+    case "engage-makers":
+    case "engage-maker":
+    case "action-targets":
+    case "community-actions":
+      return runEngageMembers(
+        flags,
+        args[0] ?? flags.type ?? flags.action ?? "like",
+        args[1] ?? flags.platform ?? "all"
+      )
+    case "like-members":
+    case "like-member":
+    case "like-makers":
+    case "like-maker":
+      return runEngageMembers(flags, "like", args[0] ?? flags.platform ?? "all")
+    case "reshare-members":
+    case "reshare-member":
+    case "reshare-makers":
+    case "reshare-maker":
+    case "repost-members":
+    case "repost-member":
+    case "repost-makers":
+    case "repost-maker":
+      return runEngageMembers(
+        flags,
+        "reshare",
+        args[0] ?? flags.platform ?? "all"
+      )
+    case "upvote-members":
+    case "upvote-member":
+    case "upvote-makers":
+    case "upvote-maker":
+      return runEngageMembers(
+        flags,
+        "upvote",
+        args[0] ?? flags.platform ?? "all"
+      )
+    case "comment-members":
+    case "comment-member":
+    case "comment-makers":
+    case "comment-maker":
+      return runEngageMembers(
+        flags,
+        "comment",
+        args[0] ?? flags.platform ?? "all"
+      )
+    case "upvote":
+    case "upvotes": {
+      const target = args[0] ?? flags.platform ?? "producthunt"
+      if (
+        target === "producthunt" ||
+        target === "product-hunt" ||
+        target === "ph"
+      ) {
+        return runEngageMembers(flags, "upvote", "producthunt")
+      }
+      if (target === "peerlist") {
+        return runFollow(flags, "worktracks-peerlist-upvote")
+      }
+      console.error(fail(`Unknown upvote target: ${target}`))
+      console.error("Try: indiecorns upvote producthunt")
+      console.error("Or:  indiecorns upvote peerlist")
+      return 1
+    }
     case "rate":
     case "rating": {
       const target = args[0] ?? "peerlist"
@@ -2930,8 +5701,10 @@ const main = async () => {
     case "join":
     case "accept":
     case "invite": {
-      const target = args[0] ?? "discord"
+      const target = args[0] ?? "slack"
       if (
+        target === "slack" ||
+        target === "slack-workspace" ||
         target === "discord" ||
         target === "server" ||
         target === "community"
@@ -2946,7 +5719,7 @@ const main = async () => {
         return runFollow(flags, "peerlist-invite")
       }
       console.error(fail(`Unknown invite target: ${target}`))
-      console.error("Try: indiecorns join discord")
+      console.error("Try: indiecorns join slack")
       console.error("Or:  indiecorns join peerlist")
       return 1
     }
@@ -2965,10 +5738,29 @@ const main = async () => {
       return runProfiles(flags)
     case "profile":
       return runProfile(flags, args)
+    case "launch":
+    case "launches":
+    case "project":
+    case "projects":
+      return runLaunch(flags, args)
+    case "post":
+    case "posts":
+      return runPost(flags, args)
     case "x":
     case "twitter":
+      if (
+        args[0] === "post" ||
+        args[0] === "posts" ||
+        args[0] === "tweet" ||
+        args[0] === "tweets"
+      ) {
+        return runPost(flags, ["set", "x", ...args.slice(1)])
+      }
       return runFollow(flags, "x")
     case "linkedin":
+      if (args[0] === "post" || args[0] === "posts") {
+        return runPost(flags, ["set", "linkedin", ...args.slice(1)])
+      }
       return runFollow(flags, "linkedin")
     case "peerlist":
     case "peers":
@@ -2977,6 +5769,28 @@ const main = async () => {
         return runProfiles({ ...flags, platform: "peerlist" })
       }
       return runFollow(flags, "peerlist")
+    case "producthunt":
+    case "product-hunt":
+    case "ph":
+      if (args[0] === "profiles" || args[0] === "profile") {
+        return runProfiles({ ...flags, platform: "producthunt" })
+      }
+      if (
+        args[0] === "launch" ||
+        args[0] === "launches" ||
+        args[0] === "project" ||
+        args[0] === "projects"
+      ) {
+        return runLaunch(flags, ["set", "producthunt", ...args.slice(1)])
+      }
+      if (args[0] === "upvote" || args[0] === "upvotes") {
+        return runEngageMembers(
+          flags,
+          "upvote",
+          args[1] ?? flags.platform ?? "producthunt"
+        )
+      }
+      return runEngageMembers(flags, "upvote", "producthunt")
     case "dashboard":
       return runDashboard(flags)
     case "extension":

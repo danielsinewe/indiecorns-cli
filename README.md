@@ -72,6 +72,7 @@ For JSON output without the full agent plan:
 npx indiecorns status --json
 npx indiecorns tasks --json
 npx indiecorns profiles --platform peerlist --json
+npx indiecorns follow-members all --agent
 ```
 
 ## Onboarding Actions
@@ -85,7 +86,10 @@ npx indiecorns follow peerlist
 npx indiecorns upvote peerlist
 npx indiecorns rate peerlist
 npx indiecorns join peerlist
-npx indiecorns join discord
+npx indiecorns join slack
+npx indiecorns follow-members peerlist
+npx indiecorns follow-members x
+npx indiecorns follow-members producthunt
 npx indiecorns complete all
 ```
 
@@ -93,6 +97,10 @@ Social actions are external-platform actions. The CLI can open the destination
 and record progress in Indiecorns, but agents should only mark an action as
 complete after the action was actually performed in the user's signed-in browser
 session.
+
+`follow-members` uses Indiecorns profile data to list or open member profiles on
+Peerlist, X, and Product Hunt. Use `--agent` or `--json` to get structured
+targets and matching `record` commands without opening browser tabs.
 
 ## External Profiles
 
@@ -104,7 +112,7 @@ npx indiecorns profile set x --username yourname
 npx indiecorns profile set linkedin --username yourname
 npx indiecorns profile set github --username yourname
 npx indiecorns profile set substack --username yourname
-npx indiecorns profile set website --profile-url https://example.com
+npx indiecorns profile set website --profile-url https://your-site.com
 npx indiecorns profile show
 ```
 

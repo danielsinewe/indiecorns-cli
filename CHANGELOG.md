@@ -1,12 +1,20 @@
 # Changelog
 
+## 0.3.30 - 2026-07-13
+
+- Add `follow-members` for opening or listing Indiecorns member profiles across
+  Peerlist, X, and Product Hunt, with agent-safe JSON targets and record
+  commands.
+- Allow `record` to save follow events for Peerlist, X, and Product Hunt
+  platform targets.
+- Replace the expired Discord setup step with the Indiecorns Slack workspace.
+- Reduce quick start to three explicit steps: connect the CLI, add a public
+  website, and join Slack. Human output now shows one next command at a time.
+
 ## 0.3.29 - 2026-06-23
 
-- Install the public `indiecorns` skill automatically when the CLI installs the
-  local agent plugin.
-- Keep the public plugin bundle user-facing by excluding internal developer
-  skills and MCP diagnostics from the published npm package.
-- Report skill installation state in the agent and wizard JSON outputs.
+- Install the public `indiecorns` skill automatically with the local agent
+  plugin and report its installation state in agent and wizard output.
 
 ## 0.3.27 - 2026-05-31
 
