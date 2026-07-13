@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.31 - 2026-07-13
+
+- Preserve the current Codex adapter and package layout from `0.3.29` while
+  shipping the clearer Slack onboarding and member-follow workflow from
+  `0.3.30`.
+- Update the declared npm package manager to the current supported release.
+
 ## 0.3.30 - 2026-07-13
 
 - Add `follow-members` for opening or listing Indiecorns member profiles across

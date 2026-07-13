@@ -1,6 +1,6 @@
 {
 	"name": "indiecorns",
-	"version": "0.3.30",
+	"version": "0.3.31",
 	"description": "Indiecorns CLI and agent plugin for account sign-in, onboarding tasks, and local setup checks.",
 	"type": "module",
 	"homepage": "https://indiecorns.com",
@@ -46,7 +46,7 @@
 		"pack:check": "npm pack --dry-run",
 		"test": "npm run smoke && npm run pack:check"
 	},
-	"packageManager": "npm@11.18.0",
+	"packageManager": "npm@12.0.1",
 	"dependencies": {
 		"posthog-node": "^5.35.0"
 	}
