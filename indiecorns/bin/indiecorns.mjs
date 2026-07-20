@@ -345,6 +345,64 @@ const writeConfig = (value) => {
   })
 }
 
+const normalizeProfileCachePlatform = (platform) =>
+  normalizeSetupAssistantPlatform(platform) ??
+  String(platform ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "")
+
+const readLocalExternalProfiles = (platform = "all") => {
+  const requestedPlatform = normalizeProfileCachePlatform(platform)
+  const profiles = readConfig().externalProfiles ?? {}
+  const rows = Object.entries(profiles)
+    .map(([key, value]) => ({
+      platform: normalizeProfileCachePlatform(value?.platform ?? key),
+      username: value?.username ?? null,
+      profileUrl: value?.profileUrl ?? null,
+      displayName: value?.displayName ?? null,
+      source: value?.source ?? "local_cli",
+      confidence: value?.confidence ?? "local",
+      updatedAt: value?.updatedAt ?? null,
+      local: true,
+    }))
+    .filter(
+      (profile) =>
+        profile.platform &&
+        (requestedPlatform === "all" || profile.platform === requestedPlatform)
+    )
+
+  return rows
+}
+
+const upsertLocalExternalProfile = (profile) => {
+  const platform = normalizeProfileCachePlatform(profile?.platform)
+  if (!platform) return null
+
+  const config = readConfig()
+  const existing = config.externalProfiles?.[platform] ?? {}
+  const localProfile = {
+    ...existing,
+    platform,
+    username: profile.username ?? existing.username ?? null,
+    profileUrl: profile.profileUrl ?? existing.profileUrl ?? null,
+    displayName: profile.displayName ?? existing.displayName ?? null,
+    source: profile.source ?? existing.source ?? "local_cli",
+    confidence: profile.confidence ?? existing.confidence ?? "local",
+    updatedAt: new Date().toISOString(),
+  }
+
+  writeConfig({
+    ...config,
+    externalProfiles: {
+      ...(config.externalProfiles ?? {}),
+      [platform]: localProfile,
+    },
+  })
+
+  return { ...localProfile, local: true }
+}
+
 const readEnvValueFromFile = (path, name) => {
   try {
     const prefix = `${name}=`
@@ -2070,22 +2128,37 @@ const getCommunityActionTargetsFromApp = async (flags) => {
 }
 
 const saveExternalProfileToApp = async ({ flags, platform }) => {
-  const headers = getCliAuthHeaders()
-  if (!headers) {
-    return null
-  }
-
+  const normalizedPlatform = normalizeProfileCachePlatform(platform)
   const rawUsername = flags.username ?? flags.user ?? flags.handle
   const rawProfileUrl = flags["profile-url"] ?? flags.url
   const resolved = await resolveProfileInput({
     flags,
-    platform,
+    platform: normalizedPlatform,
     username: rawUsername,
     profileUrl: rawProfileUrl,
   })
   const username = resolved.username ?? rawUsername
-  const profileUrl = resolved.profileUrl ?? rawProfileUrl
-  if (platform === "website" && profileUrl && isImageProfileUrl(profileUrl)) {
+  const profileUrl =
+    resolved.profileUrl ??
+    rawProfileUrl ??
+    profileUrlForSetupAssistant({
+      platform: normalizedPlatform,
+      username,
+      profileUrl: rawProfileUrl,
+    })
+  const normalizedUsername =
+    username ??
+    (profileUrl ? profileUsernameFromUrl(normalizedPlatform, profileUrl) : null)
+  const localUsername =
+    normalizedUsername ??
+    (normalizedPlatform === "website" && profileUrl
+      ? safeUrl(profileUrl)?.hostname.replace(/^www\./, "").toLowerCase()
+      : null)
+  if (
+    normalizedPlatform === "website" &&
+    profileUrl &&
+    isImageProfileUrl(profileUrl)
+  ) {
     return {
       saved: false,
       message:
@@ -2094,11 +2167,11 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
     }
   }
 
-  if (!username && !profileUrl) {
+  if (!localUsername && !profileUrl) {
     return {
       saved: false,
       message:
-        platform === "website"
+        normalizedPlatform === "website"
           ? "Add your website URL. Example: indiecorns profile set website --profile-url https://your-site.com"
           : "Missing --username or --profile-url.",
       resolution: resolved.resolution,
@@ -2107,17 +2180,36 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
 
   if (
     profileUrl &&
-    profileUrlNeedsBrowserResolution(platform, profileUrl) &&
-    !username
+    profileUrlNeedsBrowserResolution(normalizedPlatform, profileUrl) &&
+    !localUsername
   ) {
     return {
       saved: false,
       message:
-        platform === "linkedin"
+        normalizedPlatform === "linkedin"
           ? resolved.resolution.openedBrowser
             ? "Could not resolve the final LinkedIn profile URL. Make sure a desktop browser is signed in to LinkedIn and that https://www.linkedin.com/in/ forwards to your profile."
             : "Could not resolve the final LinkedIn profile URL. Run without --json or --no-open on desktop so https://www.linkedin.com/in/ can forward to your profile."
           : "Could not resolve the final profile URL. Run without --no-open on desktop, then retry after the browser reaches your profile.",
+      resolution: resolved.resolution,
+    }
+  }
+
+  const localProfile = upsertLocalExternalProfile({
+    platform: normalizedPlatform,
+    username: localUsername,
+    profileUrl,
+    displayName: flags["display-name"],
+    source: "local_cli",
+    confidence: "local",
+  })
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return {
+      saved: false,
+      localSaved: Boolean(localProfile),
+      profile: localProfile,
+      message: "Cached profile locally. Run indiecorns login to sync it to Indiecorns.",
       resolution: resolved.resolution,
     }
   }
@@ -2131,8 +2223,8 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        platform,
-        username,
+        platform: normalizedPlatform,
+        username: localUsername,
         profileUrl,
         displayName: flags["display-name"],
         source:
@@ -2146,7 +2238,7 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
   )
 
   if (!response.ok) {
-    let message = `Unable to save ${platform} profile.`
+    let message = `Unable to save ${normalizedPlatform} profile.`
     try {
       const body = await response.json()
       if (typeof body?.message === "string" && body.message.trim()) {
@@ -2157,12 +2249,21 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
     }
     return {
       saved: false,
+      localSaved: Boolean(localProfile),
+      profile: localProfile,
       message,
       resolution: resolved.resolution,
     }
   }
 
   const body = await response.json()
+  if (body?.profile) {
+    upsertLocalExternalProfile({
+      ...body.profile,
+      source: "app_synced",
+      confidence: body.profile.confidence ?? "user_verified",
+    })
+  }
   return { ...body, resolution: resolved.resolution }
 }
 
@@ -3336,10 +3437,20 @@ const runEvents = async (flags) => {
 const runProfiles = async (flags) => {
   const platform = flags.platform ?? "all"
   const result = await getExternalProfilesFromApp({ ...flags, platform })
+  const localProfiles = readLocalExternalProfiles(platform)
+  const profileMap = new Map(
+    localProfiles.map((profile) => [profile.platform, profile])
+  )
+  for (const profile of result?.profiles ?? []) {
+    profileMap.set(profile.platform, { ...profile, local: false })
+  }
+  const profiles = Array.from(profileMap.values())
   const output = {
     authenticated: Boolean(getCliAuthHeaders()),
+    appProfilesLoaded: Boolean(result),
     platform: result?.platform ?? platform,
-    profiles: result?.profiles ?? [],
+    profiles,
+    localProfiles,
     suggestedFollows: result?.suggestedFollows ?? [],
   }
 
@@ -3364,8 +3475,9 @@ const runProfiles = async (flags) => {
     console.log("Run: indiecorns profile set peerlist --username <username>")
   } else {
     for (const profile of output.profiles) {
+      const sourceLabel = profile.local ? dim(" local") : ""
       console.log(
-        `${ok(profile.platform)} @${profile.username} ${profile.profileUrl}`
+        `${ok(profile.platform)} @${profile.username} ${profile.profileUrl}${sourceLabel}`
       )
     }
   }
@@ -4974,6 +5086,52 @@ const runFollowMembers = async (flags, platformInput) =>
 const runEngageMembers = async (flags, eventTypeInput, platformInput) =>
   runCommunityActionTargets(flags, eventTypeInput, platformInput)
 
+const fieldsFromExistingProfiles = (profiles = []) => {
+  const fields = {}
+
+  for (const profile of profiles) {
+    if (!profile?.platform) continue
+    const platform = normalizeProfileCachePlatform(profile.platform)
+    const username = profile.username ? String(profile.username) : ""
+    const profileUrl = profile.profileUrl ? String(profile.profileUrl) : ""
+
+    if (platform === "indiehackers") {
+      if (username) fields.username = username
+      if (profileUrl) fields.profileUrl = profileUrl
+    }
+    if (platform === "website" && profileUrl) fields.websiteUrl = profileUrl
+    if (platform === "x" && username) fields.twitterHandle = username
+    if (platform === "github" && profileUrl) fields.githubUrl = profileUrl
+    if (platform === "linkedin" && profileUrl) fields.linkedinUrl = profileUrl
+    if (platform === "producthunt" && profileUrl) {
+      fields.productHuntUrl = profileUrl
+    }
+    if (platform === "peerlist" && profileUrl) fields.peerlistUrl = profileUrl
+    if (!fields.displayName && profile.displayName) {
+      fields.displayName = String(profile.displayName)
+    }
+  }
+
+  return fields
+}
+
+const getExistingProfilesForFill = async (flags) => {
+  const localProfiles = readLocalExternalProfiles("all")
+  const result = await getExternalProfilesFromApp({ ...flags, platform: "all" })
+  const profileMap = new Map(
+    localProfiles.map((profile) => [profile.platform, profile])
+  )
+  for (const profile of result?.profiles ?? []) {
+    profileMap.set(profile.platform, { ...profile, local: false })
+  }
+
+  return {
+    appProfilesLoaded: Boolean(result),
+    localProfiles,
+    profiles: Array.from(profileMap.values()),
+  }
+}
+
 const applyIndieHackersFillOverrides = (plan, flags) => {
   const fields = {
     username: "danielsinewe",
@@ -5018,7 +5176,20 @@ const runIndieHackers = async (flags, args = []) => {
   }
 
   const appPlan = await getIndieHackersAutofillPlanFromApp(flags)
-  const plan = applyIndieHackersFillOverrides(appPlan, flags)
+  const existingProfiles = await getExistingProfilesForFill(flags)
+  const existingProfileFields = fieldsFromExistingProfiles(
+    existingProfiles.profiles
+  )
+  const plan = applyIndieHackersFillOverrides(
+    {
+      ...(appPlan ?? {}),
+      fields: {
+        ...existingProfileFields,
+        ...(appPlan?.fields ?? {}),
+      },
+    },
+    flags
+  )
   const targetUrl =
     flags["target-url"] ??
     plan.targetUrl ??
@@ -5026,6 +5197,9 @@ const runIndieHackers = async (flags, args = []) => {
   const output = {
     authenticated: Boolean(getCliAuthHeaders()),
     appPlanLoaded: Boolean(appPlan),
+    appProfilesLoaded: existingProfiles.appProfilesLoaded,
+    localProfileCount: existingProfiles.localProfiles.length,
+    localProfilesUsed: existingProfiles.localProfiles.length > 0,
     readOnly: true,
     targetUrl,
     profileUrl:
@@ -5047,10 +5221,10 @@ const runIndieHackers = async (flags, args = []) => {
 
   if (flags.json || flags.agent) {
     printJson(output)
-    return output.authenticated ? 0 : 1
+    return output.authenticated || output.localProfilesUsed ? 0 : 1
   }
 
-  if (!output.authenticated) {
+  if (!output.authenticated && !output.localProfilesUsed) {
     console.log(warn("No authenticated CLI session found. Run: indiecorns login"))
     return 1
   }
@@ -5105,6 +5279,7 @@ const runProfile = async (flags, args) => {
   const output = {
     authenticated: Boolean(getCliAuthHeaders()),
     saved: Boolean(savedProfile?.saved),
+    localSaved: Boolean(savedProfile?.localSaved),
     profile: savedProfile?.profile,
     message: savedProfile?.message,
     resolution: savedProfile?.resolution,
@@ -5112,26 +5287,37 @@ const runProfile = async (flags, args) => {
 
   if (flags.json) {
     printJson(output)
-    return output.saved ? 0 : 1
+    return output.saved || output.localSaved ? 0 : 1
   }
 
-  if (!output.authenticated) {
+  if (!output.authenticated && !output.localSaved) {
     console.log(
       warn("No authenticated CLI session found. Run: indiecorns login")
     )
     return 1
   }
 
-  if (!output.saved) {
+  if (!output.saved && !output.localSaved) {
     console.log(warn(output.message ?? "Profile was not saved."))
     return 1
   }
 
   if (platform === "website") {
-    console.log(ok(`Saved website ${output.profile?.username}.`))
+    console.log(
+      ok(
+        `${output.saved ? "Saved" : "Cached"} website ${output.profile?.username}.`
+      )
+    )
     console.log("Next: indiecorns join slack")
   } else {
-    console.log(ok(`Saved ${platform} username @${output.profile?.username}.`))
+    console.log(
+      ok(
+        `${output.saved ? "Saved" : "Cached"} ${platform} username @${output.profile?.username}.`
+      )
+    )
+  }
+  if (!output.saved && output.message) {
+    console.log(dim(output.message))
   }
   if (output.profile?.profileUrl) {
     console.log(dim(output.profile.profileUrl))

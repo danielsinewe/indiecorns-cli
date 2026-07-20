@@ -1,6 +1,6 @@
 {
 	"name": "indiecorns",
-	"version": "0.3.33",
+	"version": "0.3.34",
 	"description": "Indiecorns CLI and agent plugin for account sign-in, onboarding tasks, and local setup checks.",
 	"type": "module",
 	"homepage": "https://indiecorns.com",

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.34 - 2026-07-20
+
+- Cache `profile set` values locally so existing profiles remain available when
+  the app session is stale or unavailable.
+- Merge local and live existing profiles into `indiehackers fill-profile`, so
+  the Indie Hackers fill plan can include saved website, X, GitHub, LinkedIn,
+  Product Hunt, and Peerlist profile fields without requiring a fresh app plan.
+
 ## 0.3.33 - 2026-07-20
 
 - Add `indiehackers fill-profile` to return an agent-safe Indie Hackers profile
