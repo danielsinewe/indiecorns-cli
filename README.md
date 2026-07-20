@@ -117,8 +117,10 @@ npx indiecorns profile set peerlist --username yourname
 npx indiecorns profile set x --username yourname
 npx indiecorns profile set linkedin --username yourname
 npx indiecorns profile set github --username yourname
+npx indiecorns profile set indiehackers --username yourname
 npx indiecorns profile set substack --username yourname
 npx indiecorns profile set website --profile-url https://your-site.com
+npx indiecorns indiehackers fill-profile --agent
 npx indiecorns profile show
 ```
 

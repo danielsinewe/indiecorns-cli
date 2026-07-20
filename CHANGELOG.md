@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.33 - 2026-07-20
+
+- Add `indiehackers fill-profile` to return an agent-safe Indie Hackers profile
+  fill plan for `https://www.indiehackers.com/danielsinewe/editing`.
+- Add Indie Hackers profile parsing and `profile set indiehackers` support for
+  saved Indiecorns social links.
+- Update packaged Indiecorns skill docs so agents can discover the profile fill
+  workflow from the public npm package.
+
 ## 0.3.32 - 2026-07-20
 
 - Add `peerlist-launches` as a Monday-gated Peerlist project launch queue that

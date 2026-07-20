@@ -95,6 +95,7 @@ Commands:
   community-plan [platform]      Print a read-only multi-action community plan
   community-status               Summarize community targets, records, and reporting
   peerlist-launches              Monday Peerlist launch upvote + 5-star rating queue
+  indiehackers fill-profile      Prefill the Indie Hackers profile edit form
   join slack                     Open the Indiecorns Slack invite
   record <platform> --target <u> Record an external action event
   events                         Show recorded external action events
@@ -102,6 +103,8 @@ Commands:
   profile show [platform]        Show your saved external profiles
   profile set peerlist --username <u>
                                  Save your Peerlist username for Indiecorns
+  profile set indiehackers --username <u>
+                                 Save your Indie Hackers username for Indiecorns
   profile set website --profile-url <url>
                                  Save your public website URL
   launch set <platform> --url    Save your launch/project URL for support
@@ -139,6 +142,9 @@ Options:
   --url <url>                    Profile, launch, or target URL
   --name <name>                  Launch/project name
   --display-name <name>          External platform display name
+  --bio <text>                   Profile bio for supported fill flows
+  --website-url <url>            Website URL for supported fill flows
+  --twitter-handle <username>    X/Twitter handle for supported fill flows
   --apply                        Apply safe setup assistant profile saves
   --label-before <label>         Observed button/status label before action
   --label-after <label>          Observed button/status label after action
@@ -1432,6 +1438,7 @@ const SETUP_ASSISTANT_PROFILE_PLATFORMS = [
   "x",
   "linkedin",
   "github",
+  "indiehackers",
   "producthunt",
   "substack",
   "website",
@@ -1443,6 +1450,10 @@ const SETUP_ASSISTANT_PLATFORM_ALIASES = {
   ph: "producthunt",
   producthunt: "producthunt",
   producthuntcom: "producthunt",
+  ih: "indiehackers",
+  indiehacker: "indiehackers",
+  indiehackers: "indiehackers",
+  indiehackerscom: "indiehackers",
   link: "website",
   site: "website",
   homepage: "website",
@@ -1467,6 +1478,7 @@ const inferSetupAssistantPlatform = (value) => {
   if (host === "x.com" || host === "twitter.com") return "x"
   if (host.endsWith("linkedin.com")) return "linkedin"
   if (host === "github.com") return "github"
+  if (host === "indiehackers.com") return "indiehackers"
   if (host === "producthunt.com") return "producthunt"
   if (host.endsWith(".substack.com")) return "substack"
   return urlLike(value) ? "website" : null
@@ -1479,6 +1491,9 @@ const profileUrlForSetupAssistant = ({ platform, username, profileUrl }) => {
   if (platform === "x") return `https://x.com/${username}`
   if (platform === "linkedin") return `https://www.linkedin.com/in/${username}`
   if (platform === "github") return `https://github.com/${username}`
+  if (platform === "indiehackers") {
+    return `https://www.indiehackers.com/${username}`
+  }
   if (platform === "producthunt") {
     return `https://www.producthunt.com/@${username}`
   }
@@ -1610,6 +1625,12 @@ const profileUsernameFromUrl = (platform, value) => {
   }
   if (platform === "github") {
     if (host === "github.com" && first) {
+      return first.toLowerCase().replace(/[^a-z0-9._-]/g, "") || null
+    }
+    return null
+  }
+  if (platform === "indiehackers") {
+    if (host === "indiehackers.com" && first) {
       return first.toLowerCase().replace(/[^a-z0-9._-]/g, "") || null
     }
     return null
@@ -1987,6 +2008,24 @@ const getExternalProfilesFromApp = async (flags) => {
   }
 
   const response = await fetch(url, { headers })
+
+  if (!response.ok) {
+    return null
+  }
+
+  return response.json()
+}
+
+const getIndieHackersAutofillPlanFromApp = async (flags) => {
+  const headers = getCliAuthHeaders()
+  if (!headers) {
+    return null
+  }
+
+  const response = await fetch(
+    `${getAppUrl(flags)}/api/users/indiehackers/autofill`,
+    { headers }
+  )
 
   if (!response.ok) {
     return null
@@ -4935,6 +4974,102 @@ const runFollowMembers = async (flags, platformInput) =>
 const runEngageMembers = async (flags, eventTypeInput, platformInput) =>
   runCommunityActionTargets(flags, eventTypeInput, platformInput)
 
+const applyIndieHackersFillOverrides = (plan, flags) => {
+  const fields = {
+    username: "danielsinewe",
+    displayName: "Daniel Sinewe",
+    bio:
+      "Building Indiecorns, a global indie hacker collective for shipping and supporting projects together.",
+    websiteUrl: "https://indiecorns.com",
+    ...(plan?.fields ?? {}),
+  }
+
+  if (flags.username) fields.username = String(flags.username)
+  if (flags["display-name"] || flags.name) {
+    fields.displayName = String(flags["display-name"] ?? flags.name)
+  }
+  if (flags.bio) fields.bio = String(flags.bio)
+  if (flags["website-url"] || flags.url) {
+    fields.websiteUrl = String(flags["website-url"] ?? flags.url)
+  }
+  if (flags["twitter-handle"] || flags.x) {
+    fields.twitterHandle = String(flags["twitter-handle"] ?? flags.x).replace(
+      /^@/,
+      ""
+    )
+  }
+
+  return {
+    ...(plan ?? {}),
+    fields,
+  }
+}
+
+const runIndieHackers = async (flags, args = []) => {
+  const subcommand = args[0] ?? "fill-profile"
+  if (
+    subcommand !== "fill-profile" &&
+    subcommand !== "fill" &&
+    subcommand !== "autofill"
+  ) {
+    console.error(fail(`Unknown Indie Hackers command: ${subcommand}`))
+    console.error("Try: indiecorns indiehackers fill-profile --agent")
+    return 1
+  }
+
+  const appPlan = await getIndieHackersAutofillPlanFromApp(flags)
+  const plan = applyIndieHackersFillOverrides(appPlan, flags)
+  const targetUrl =
+    flags["target-url"] ??
+    plan.targetUrl ??
+    "https://www.indiehackers.com/danielsinewe/editing"
+  const output = {
+    authenticated: Boolean(getCliAuthHeaders()),
+    appPlanLoaded: Boolean(appPlan),
+    readOnly: true,
+    targetUrl,
+    profileUrl:
+      plan.profileUrl ??
+      `https://www.indiehackers.com/${plan.fields?.username ?? "danielsinewe"}`,
+    fields: plan.fields ?? {},
+    browserAutomation: {
+      command: `npx indiecorns extension open --app-url ${getAppUrl(flags)}`,
+      actionId: "indiehackers-profile-fill",
+      saveRequiresExplicitReview: true,
+    },
+    nextCommands: [
+      `npx indiecorns indiehackers fill-profile --open --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns profile set indiehackers --username ${shellQuote(plan.fields?.username ?? "danielsinewe")} --app-url ${getAppUrl(flags)}`,
+    ],
+    reminder:
+      "Fill the Indie Hackers form in a signed-in browser, review it, then save manually.",
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.authenticated ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(warn("No authenticated CLI session found. Run: indiecorns login"))
+    return 1
+  }
+
+  if (flags.open || !flags["no-open"]) {
+    openUrl(targetUrl)
+  }
+
+  console.log(color("Indie Hackers profile fill plan", colors.cyan))
+  for (const [key, value] of Object.entries(output.fields)) {
+    if (value) {
+      console.log(`${ok(key)} ${value}`)
+    }
+  }
+  console.log("")
+  console.log(dim(output.reminder))
+  return 0
+}
+
 const runProfile = async (flags, args) => {
   const subcommand = args[0] ?? "show"
   if (
@@ -5966,6 +6101,13 @@ const main = async () => {
       return runProfiles(flags)
     case "profile":
       return runProfile(flags, args)
+    case "indiehackers":
+    case "indie-hackers":
+    case "ih":
+      if (args[0] === "profiles" || args[0] === "profile") {
+        return runProfiles({ ...flags, platform: "indiehackers" })
+      }
+      return runIndieHackers(flags, args)
     case "launch":
     case "launches":
     case "project":

@@ -26,6 +26,7 @@ npm run cli -- upvote peerlist --no-open
 npm run cli -- upvote-members peerlist --agent
 npm run cli -- rate peerlist --agent
 npm run cli -- peerlist-launches --agent
+npm run cli -- indiehackers fill-profile --agent
 npm run cli -- join peerlist --no-open
 npm run cli -- profiles --platform peerlist --json
 npm run cli -- complete all
@@ -47,6 +48,7 @@ npx indiecorns upvote peerlist --no-open
 npx indiecorns upvote-members peerlist --agent
 npx indiecorns rate peerlist --agent
 npx indiecorns peerlist-launches --agent
+npx indiecorns indiehackers fill-profile --agent
 npx indiecorns join peerlist --no-open
 npx indiecorns profiles --platform peerlist --json
 npx indiecorns complete all
@@ -102,6 +104,10 @@ platform provides a token.
   queue. It returns project upvote and 5-star rating targets for Indiecorns
   launches, plus after-proof record commands. Only run those commands after the
   upvote and rating are visibly complete in a signed-in Peerlist browser.
+- Use `npx indiecorns indiehackers fill-profile --agent` to get the current
+  Indie Hackers profile fill plan. Browser automation may prefill
+  `https://www.indiehackers.com/danielsinewe/editing`, but the user must review
+  and save the form manually.
 - Treat social actions as external-platform actions. Agents may open the X,
   Product Hunt, and Peerlist URLs and click Follow, Upvote, or accept the company
   invitation when the user is already signed in, then record proof with
