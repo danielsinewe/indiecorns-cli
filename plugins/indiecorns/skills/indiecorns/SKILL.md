@@ -23,6 +23,9 @@ npm run cli -- follow linkedin --no-open
 npm run cli -- follow peerlist --no-open
 npm run cli -- follow-members all --agent
 npm run cli -- upvote peerlist --no-open
+npm run cli -- upvote-members peerlist --agent
+npm run cli -- rate peerlist --agent
+npm run cli -- peerlist-launches --agent
 npm run cli -- join peerlist --no-open
 npm run cli -- profiles --platform peerlist --json
 npm run cli -- complete all
@@ -41,6 +44,9 @@ npx indiecorns follow linkedin --no-open
 npx indiecorns follow peerlist --no-open
 npx indiecorns follow-members all --agent
 npx indiecorns upvote peerlist --no-open
+npx indiecorns upvote-members peerlist --agent
+npx indiecorns rate peerlist --agent
+npx indiecorns peerlist-launches --agent
 npx indiecorns join peerlist --no-open
 npx indiecorns profiles --platform peerlist --json
 npx indiecorns complete all
@@ -92,6 +98,10 @@ platform provides a token.
 - Use `npx indiecorns follow-members all --agent` to retrieve Indiecorns member
   follow targets for Peerlist, X, and Product Hunt. Follow the external profile
   in the signed-in browser before running the target's `recordCommand`.
+- Use `npx indiecorns peerlist-launches --agent` for the Monday Peerlist launch
+  queue. It returns project upvote and 5-star rating targets for Indiecorns
+  launches, plus after-proof record commands. Only run those commands after the
+  upvote and rating are visibly complete in a signed-in Peerlist browser.
 - Treat social actions as external-platform actions. Agents may open the X,
   Product Hunt, and Peerlist URLs and click Follow, Upvote, or accept the company
   invitation when the user is already signed in, then record proof with

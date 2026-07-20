@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.32 - 2026-07-20
+
+- Add `peerlist-launches` as a Monday-gated Peerlist project launch queue that
+  returns upvote and 5-star rating targets with after-proof record commands.
+- Treat `rate` as a first-class community action for Peerlist launch targets and
+  store bounded rating metadata when recording completed external actions.
+- Update packaged Indiecorns skill docs so agents can discover the new weekly
+  launch support flow from the public npm package.
+
 ## 0.3.31 - 2026-07-13
 
 - Preserve the current Codex adapter and package layout from `0.3.29` while

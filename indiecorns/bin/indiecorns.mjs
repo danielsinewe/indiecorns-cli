@@ -88,12 +88,13 @@ Commands:
   follow <task>                  Open an onboarding link
   follow-members [platform]      Open Indiecorns member profiles to follow
   engage-members <action> [platform]
-                                 Open member targets for like, reshare, upvote, or comment
+                                 Open member targets for like, reshare, upvote, rate, or comment
   community-queue [platform]     Show a flat queue of community action targets
   community-open [platform]      Open queued community action targets
   community-next [platform]      Show the next community action target
   community-plan [platform]      Print a read-only multi-action community plan
   community-status               Summarize community targets, records, and reporting
+  peerlist-launches              Monday Peerlist launch upvote + 5-star rating queue
   join slack                     Open the Indiecorns Slack invite
   record <platform> --target <u> Record an external action event
   events                         Show recorded external action events
@@ -132,7 +133,7 @@ Options:
   --target <username>            External platform username being acted on
   --target-url <url>             External platform target URL being acted on
   --target-type <type>           External target type: profile, post, or project
-  --type <event>                 External event type: follow, like, reshare, upvote, comment
+  --type <event>                 External event type: follow, like, reshare, upvote, rate, comment
   --username <username>          Your external platform username
   --profile-url <url>            Your external platform profile URL
   --url <url>                    Profile, launch, or target URL
@@ -718,6 +719,7 @@ const COMMUNITY_ACTION_EVENT_TYPES = [
   "like",
   "reshare",
   "upvote",
+  "rate",
   "comment",
 ]
 const COMMUNITY_TARGET_SOURCES = ["profiles", "posts", "projects"]
@@ -742,6 +744,7 @@ const normalizeCommunityEventType = (value) => {
     .replace(/_/g, "-")
   if (normalized === "repost" || normalized === "share") return "reshare"
   if (normalized === "vote") return "upvote"
+  if (normalized === "rating" || normalized === "rated") return "rate"
   return normalized || "follow"
 }
 
@@ -772,7 +775,7 @@ const getCommunityActionPlatforms = (value) => {
 }
 
 const requiresProjectTarget = (eventType) =>
-  eventType === "upvote" || eventType === "comment"
+  eventType === "upvote" || eventType === "rate" || eventType === "comment"
 
 const getCommunityActionSetupCommands = ({
   eventType,
@@ -796,7 +799,7 @@ const getCommunityActionSetupCommands = ({
     } else if (
       targetSource !== "profiles" &&
       targetSource !== "posts" &&
-      eventType === "upvote" &&
+      (eventType === "upvote" || eventType === "rate") &&
       platform === "peerlist"
     ) {
       commands.push(
@@ -918,7 +921,7 @@ const normalizeRecordTargetType = (value) => {
 
 const inferRecordTargetType = ({ platform, eventType, targetProfileUrl }) => {
   if (eventType === "follow") return "profile_follow"
-  if (eventType === "upvote") return "project"
+  if (eventType === "upvote" || eventType === "rate") return "project"
   if (
     ["like", "reshare", "comment"].includes(eventType) &&
     isCommunityPostUrlForPlatform(platform, targetProfileUrl)
@@ -926,7 +929,7 @@ const inferRecordTargetType = ({ platform, eventType, targetProfileUrl }) => {
     return "post"
   }
   if (
-    ["upvote", "comment"].includes(eventType) &&
+    ["upvote", "rate", "comment"].includes(eventType) &&
     isCommunityLaunchUrlForPlatform(platform, targetProfileUrl)
   ) {
     return "project"
@@ -953,6 +956,9 @@ const getRecordCommand = (profile, flags, eventType = "follow") => {
   }
   if (profile.targetType) {
     targetParts.push(`--target-type ${shellQuote(profile.targetType)}`)
+  }
+  if (eventType === "rate") {
+    targetParts.push(`--rating ${shellQuote(profile.rating ?? 5)}`)
   }
   if (eventType !== "follow" || !profile.username) {
     targetParts.push(`--target-url ${shellQuote(profile.profileUrl)}`)
@@ -1307,6 +1313,7 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
       "npx indiecorns community-next --agent",
       "npx indiecorns community-plan --agent",
         "npx indiecorns community-status --agent",
+        "npx indiecorns peerlist-launches --agent",
         "npx indiecorns engage-members like x --agent",
         "npx indiecorns engage-members reshare linkedin --agent",
         "npx indiecorns engage-members comment x --agent",
@@ -1314,6 +1321,8 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
         "npx indiecorns post list all --agent",
         "npx indiecorns launch set producthunt --url <url> --name <name>",
         "npx indiecorns launch list all --agent",
+        "npx indiecorns upvote-members peerlist --agent",
+        "npx indiecorns rate peerlist --agent",
         "npx indiecorns upvote-members producthunt --agent",
       ])
     ),
@@ -2329,6 +2338,11 @@ const saveExternalActionEventToApp = async ({
     normalizeRecordTargetType(rawTargetType) ??
     inferRecordTargetType({ platform, eventType, targetProfileUrl })
   const queueKey = flags["queue-key"] ?? flags.queueKey ?? null
+  const ratingValue = Number.parseInt(flags.rating ?? flags.stars ?? "5", 10)
+  const rating =
+    eventType === "rate" && Number.isFinite(ratingValue)
+      ? Math.min(Math.max(ratingValue, 1), 5)
+      : null
 
   if (!targetProfileUrl) {
     return {
@@ -2382,6 +2396,7 @@ const saveExternalActionEventToApp = async ({
       metadata: {
         recordedBy: "indiecorns-cli",
         targetType,
+        ...(rating ? { rating, peerlistRating: { rating, maxRating: 5 } } : {}),
         ...(queueKey ? { queueKey } : {}),
       },
     }),
@@ -3619,6 +3634,7 @@ const collectCommunityActionTargets = async (
         "Try: indiecorns follow-members peerlist",
         "Or:  indiecorns engage-members like x",
         "Or:  indiecorns engage-members upvote producthunt",
+        "Or:  indiecorns peerlist-launches --agent",
       ],
     }
   }
@@ -3627,7 +3643,7 @@ const collectCommunityActionTargets = async (
     return {
       ok: false,
       message: "Unknown community action.",
-      hints: ["Try: follow, like, reshare, upvote, or comment"],
+      hints: ["Try: follow, like, reshare, upvote, rate, or comment"],
     }
   }
   if (
@@ -3669,13 +3685,18 @@ const collectCommunityActionTargets = async (
         profileUrl: target.profileUrl,
       })
       if (!profileUrl) continue
-      targets.push({
+      const actionTarget = {
         ...target,
+        ...(eventType === "rate" ? { rating: 5 } : {}),
+        profileUrl,
+      }
+      targets.push({
+        ...actionTarget,
         profileUrl,
         eventType,
         targetSource: targetResult?.targetSource ?? null,
         recordCommand: getRecordCommand(
-          { ...target, profileUrl },
+          actionTarget,
           flags,
           eventType
         ),
@@ -3740,6 +3761,7 @@ const collectCommunityActionTargets = async (
         targetSource: "profiles",
         profileUrl,
         eventType,
+        ...(eventType === "rate" ? { rating: 5 } : {}),
       }
       targets.push({
         ...actionTarget,
@@ -3848,6 +3870,7 @@ const COMMUNITY_PLAN_ACTIONS = [
   { eventType: "comment", platform: "linkedin" },
   { eventType: "comment", platform: "x" },
   { eventType: "upvote", platform: "peerlist" },
+  { eventType: "rate", platform: "peerlist" },
   { eventType: "upvote", platform: "producthunt" },
 ]
 
@@ -4494,6 +4517,194 @@ const runCommunityNext = async (flags, args = []) => {
     if (!flags["no-open"]) {
       openUrl(target.targetUrl)
     }
+  }
+  console.log("")
+  console.log(dim(output.reminder))
+  return 0
+}
+
+const isMonday = (date = new Date()) => date.getDay() === 1
+
+const getNextMondayIsoDate = (date = new Date()) => {
+  const next = new Date(date)
+  const day = next.getDay()
+  const daysUntilMonday = ((8 - day) % 7) || 7
+  next.setDate(next.getDate() + daysUntilMonday)
+  return next.toISOString().slice(0, 10)
+}
+
+const runPeerlistLaunches = async (flags) => {
+  const force = Boolean(flags.force || flags["run-now"])
+  const today = new Date()
+  const due = isMonday(today) || force
+  const limit = Number.parseInt(flags.limit ?? "", 10)
+  const targetLimit = Number.isFinite(limit) && limit > 0 ? limit : null
+
+  if (!due) {
+    const output = {
+      authenticated: Boolean(getCliAuthHeaders()),
+      readOnly: true,
+      due: false,
+      platform: "peerlist",
+      targetSource: "projects",
+      count: 0,
+      targets: [],
+      afterProofCommands: [],
+      nextCommands: [
+        `npx indiecorns peerlist-launches --agent --app-url ${getAppUrl(flags)}`,
+      ],
+      nextRunDate: getNextMondayIsoDate(today),
+      reminder:
+        "Peerlist launch checks run on Mondays. Use --force only for manual catch-up.",
+    }
+
+    if (flags.json || flags.agent) {
+      printJson(output)
+      return output.authenticated ? 0 : 1
+    }
+
+    if (!output.authenticated) {
+      console.log(warn("No authenticated CLI session found. Run: indiecorns login"))
+      return 1
+    }
+
+    console.log(warn(`Peerlist launch check is not due until ${output.nextRunDate}.`))
+    console.log(dim(output.reminder))
+    return 0
+  }
+
+  const actionResults = await Promise.all([
+    collectCommunityActionTargets(
+      {
+        ...flags,
+        ...(targetLimit ? { limit: String(targetLimit) } : {}),
+        "no-open": true,
+        "target-source": "projects",
+      },
+      "upvote",
+      "peerlist"
+    ),
+    collectCommunityActionTargets(
+      {
+        ...flags,
+        ...(targetLimit ? { limit: String(targetLimit) } : {}),
+        "no-open": true,
+        "target-source": "projects",
+      },
+      "rate",
+      "peerlist"
+    ),
+  ])
+
+  const errors = actionResults.filter((result) => !result.ok)
+  if (errors.length > 0) {
+    const output = {
+      authenticated: Boolean(getCliAuthHeaders()),
+      readOnly: true,
+      due: true,
+      ok: false,
+      message: errors.map((error) => error.message).join(" "),
+      targets: [],
+      afterProofCommands: [],
+    }
+    if (flags.json || flags.agent) printJson(output)
+    else console.log(warn(output.message))
+    return 1
+  }
+
+  const actions = actionResults.map((result) => ({
+    eventType: result.eventType,
+    platforms: result.platforms,
+    count: result.count,
+    targetSource: result.targetSource,
+    targets: result.targets,
+    targetSources: result.targetSources,
+    setupCommands: result.setupCommands,
+  }))
+  const targets = getCommunityQueueTargetsFromSnapshot(
+    { actions },
+    targetLimit ? targetLimit * 2 : Number.POSITIVE_INFINITY
+  )
+  const uniqueLaunches = Array.from(
+    new Map(
+      targets.map((target) => [
+        String(target.targetUrl).toLowerCase().replace(/\/$/, ""),
+        {
+          targetLabel: target.targetLabel,
+          targetUrl: target.targetUrl,
+          username: target.username,
+          displayName: target.displayName,
+        },
+      ])
+    ).values()
+  )
+  const output = {
+    authenticated: Boolean(getCliAuthHeaders()),
+    readOnly: true,
+    due: true,
+    platform: "peerlist",
+    targetSource: "projects",
+    rating: 5,
+    count: targets.length,
+    launchCount: uniqueLaunches.length,
+    targets,
+    launches: uniqueLaunches,
+    summary: summarizeCommunityQueueTargets(targets),
+    actions: actions.map((action) => ({
+      eventType: action.eventType,
+      platforms: action.platforms,
+      targetCount: action.count,
+      targetSources:
+        action.targetSources ?? summarizeCommunityTargetSources(action.targets),
+    })),
+    setupCommands: Array.from(
+      new Set(actions.flatMap((action) => action.setupCommands ?? []))
+    ),
+    afterProofCommands: targets
+      .map((target) => target.recordCommand)
+      .filter(Boolean),
+    nextCommands: [
+      `npx indiecorns peerlist-launches --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns community-queue peerlist --type upvote --target-source projects --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns community-queue peerlist --type rate --target-source projects --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns events --agent --platform peerlist --app-url ${getAppUrl(flags)}`,
+    ],
+    reporting: getCommunityReportingInfo(flags),
+    reminder:
+      "Open each Peerlist launch, upvote it, submit a genuine 5-star rating, then run each record command only after both actions are visibly complete.",
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return output.authenticated ? 0 : 1
+  }
+
+  if (!output.authenticated) {
+    console.log(warn("No authenticated CLI session found. Run: indiecorns login"))
+    return 1
+  }
+
+  if (uniqueLaunches.length === 0) {
+    console.log(warn("No new Peerlist launches are available."))
+    for (const command of output.setupCommands) {
+      console.log(dim(`Setup: ${command}`))
+    }
+    return 0
+  }
+
+  console.log(color("Monday Peerlist launch support", colors.cyan))
+  for (const launch of uniqueLaunches) {
+    console.log(`${ok("launch")} ${launch.targetLabel}`)
+    console.log(`  ${launch.targetUrl}`)
+    if (!flags["no-open"]) {
+      openUrl(launch.targetUrl)
+    }
+  }
+  console.log("")
+  for (const target of targets) {
+    console.log(
+      `  after ${target.eventType}${target.eventType === "rate" ? " 5-star" : ""}: ${dim(target.recordCommand)}`
+    )
   }
   console.log("")
   console.log(dim(output.reminder))
@@ -5371,6 +5582,9 @@ const getWizardReport = async (flags) => {
       commentXMembers: `npx indiecorns engage-members comment x --agent --app-url ${appUrl}`,
       listCommunityPosts: `npx indiecorns post list all --agent --app-url ${appUrl}`,
       listCommunityLaunches: `npx indiecorns launch list all --agent --app-url ${appUrl}`,
+      peerlistLaunches: `npx indiecorns peerlist-launches --agent --app-url ${appUrl}`,
+      upvotePeerlistMembers: `npx indiecorns upvote-members peerlist --agent --app-url ${appUrl}`,
+      ratePeerlistLaunches: `npx indiecorns rate peerlist --agent --app-url ${appUrl}`,
       upvoteProductHuntMembers: `npx indiecorns upvote-members producthunt --agent --app-url ${appUrl}`,
       pluginInstall: "npx indiecorns plugin install",
     },
@@ -5615,6 +5829,12 @@ const main = async () => {
     case "support-status":
     case "activity-status":
       return runCommunityStatus(flags)
+    case "peerlist-launches":
+    case "peerlist-launch":
+    case "weekly-peerlist-launches":
+    case "monday-peerlist":
+    case "monday-launches":
+      return runPeerlistLaunches(flags)
     case "engage-members":
     case "engage-member":
     case "engage-makers":
@@ -5673,7 +5893,11 @@ const main = async () => {
         return runEngageMembers(flags, "upvote", "producthunt")
       }
       if (target === "peerlist") {
-        return runFollow(flags, "worktracks-peerlist-upvote")
+        return runEngageMembers(
+          { ...flags, "target-source": "projects" },
+          "upvote",
+          "peerlist"
+        )
       }
       console.error(fail(`Unknown upvote target: ${target}`))
       console.error("Try: indiecorns upvote producthunt")
@@ -5688,7 +5912,11 @@ const main = async () => {
         target === "launch" ||
         target === "indiecorns"
       ) {
-        return runFollow(flags, "peerlist-rating")
+        return runEngageMembers(
+          { ...flags, "target-source": "projects" },
+          "rate",
+          "peerlist"
+        )
       }
       if (target === "worktracks" || target === "worktracks-v2") {
         return runFollow(flags, "worktracks-peerlist-rating")

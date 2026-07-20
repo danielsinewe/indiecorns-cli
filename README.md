@@ -85,6 +85,7 @@ npx indiecorns follow linkedin
 npx indiecorns follow peerlist
 npx indiecorns upvote peerlist
 npx indiecorns rate peerlist
+npx indiecorns peerlist-launches --agent
 npx indiecorns join peerlist
 npx indiecorns join slack
 npx indiecorns follow-members peerlist
@@ -101,6 +102,11 @@ session.
 `follow-members` uses Indiecorns profile data to list or open member profiles on
 Peerlist, X, and Product Hunt. Use `--agent` or `--json` to get structured
 targets and matching `record` commands without opening browser tabs.
+
+`peerlist-launches` is the Monday community-support queue for Peerlist project
+launches. It returns upvote and 5-star rating record commands, but those
+commands should only run after the launch actions are visibly completed in a
+signed-in browser.
 
 ## External Profiles
 
