@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const DEFAULT_APP_URL = "https://app.indiecorns.com"
+const DEFAULT_APP_URL = "https://indiecorns.lovable.app"
 const DEFAULT_POSTHOG_KEY = "phc_DkrgYsexPgXyGqsCm3nPP4wFT6GSQaxaLZzGx4RpABtV"
 const CLI_INSTALL_ACTION_ID = "cli"
 const QUICK_START_ACTION_IDS = [
@@ -437,8 +437,18 @@ const ensureOpenAiApiKey = () => {
 }
 
 const hasToken = () => Boolean(process.env.INDIECORNS_TOKEN)
-const hasBrowserSession = () =>
-  Boolean(readConfig().browserSession?.authenticatedAt)
+const hasBrowserSession = () => {
+  const session = readConfig().browserSession
+  if (!session?.authenticatedAt) return false
+  if (
+    session.accessToken &&
+    session.tokenExpiresAt &&
+    new Date(session.tokenExpiresAt).getTime() <= Date.now()
+  ) {
+    return false
+  }
+  return Boolean(session.accessToken || (session.cliSessionId && session.cliSecret))
+}
 
 const getCliVersion = () => {
   const candidates = [
@@ -1156,7 +1166,33 @@ const getAgentCapability = (action, authenticated) => {
   return "browser_assisted"
 }
 
+const getCliAccessToken = () => {
+  const environmentToken = String(process.env.INDIECORNS_TOKEN ?? "").trim()
+  if (environmentToken) return environmentToken
+  const session = readConfig().browserSession
+  if (
+    session?.tokenExpiresAt &&
+    new Date(session.tokenExpiresAt).getTime() <= Date.now()
+  ) {
+    return null
+  }
+  return String(session?.accessToken ?? "").trim() || null
+}
+
+const usesPublicCliApi = () => Boolean(getCliAccessToken())
+
+const getCliEndpoint = (modernPath, legacyPath) =>
+  usesPublicCliApi() ? modernPath : legacyPath
+
 const getCliAuthHeaders = () => {
+  const accessToken = getCliAccessToken()
+  if (accessToken) {
+    return {
+      Authorization: `Bearer ${accessToken}`,
+      "x-indiecorns-cli-version": getCliVersion(),
+    }
+  }
+
   const session = readConfig().browserSession
   if (!session?.cliSessionId || !session?.cliSecret) {
     return null
@@ -1179,7 +1215,9 @@ const getAgentPlanFromApp = async (flags) => {
   }
 
   try {
-    const url = new URL(`${getAppUrl(flags)}/api/agent/plan`)
+    const url = new URL(
+      `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/agent-plan", "/api/agent/plan")}`
+    )
     url.searchParams.set("source", flags.source ?? "cli_agent")
 
     const response = await fetch(url, { headers })
@@ -1187,7 +1225,27 @@ const getAgentPlanFromApp = async (flags) => {
       return null
     }
 
-    return response.json()
+    const body = await response.json()
+    if (usesPublicCliApi() && Array.isArray(body.plan)) {
+      return {
+        ...body,
+        actions: body.plan.map((item) => ({
+          ...item,
+          id: item.key,
+          kind: item.action_url ? "open_url" : "command",
+          url: item.action_url,
+          targetUrl: item.action_url,
+          credits: item.points,
+          status: item.status === "completed" ? "completed" : "pending",
+          blocked: item.status === "blocked",
+          requires: item.depends_on ?? [],
+          command: `npx indiecorns follow ${item.key}`,
+          agentCommand: `npx indiecorns follow ${item.key} --agent`,
+          verification: "server_verified",
+        })),
+      }
+    }
+    return body
   } catch {
     return null
   }
@@ -1234,7 +1292,7 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
         credits: 0,
         platform: "indiecorns",
         status: "pending",
-        targetUrl: `${appUrl}/sign-in?source=cli`,
+        targetUrl: `${appUrl}/auth?source=cli`,
         agentCommand: `npx indiecorns login --app-url ${appUrl}`,
         completeCommand: "npx indiecorns status --json",
         agentCapability: "blocked_auth",
@@ -1264,8 +1322,8 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
     auth: {
       authenticated,
       method: hasToken() ? "INDIECORNS_TOKEN" : "browser",
-      loginUrl: `${appUrl}/sign-in?source=cli`,
-      signupUrl: `${appUrl}/sign-up?source=cli`,
+      loginUrl: `${appUrl}/auth?source=cli`,
+      signupUrl: `${appUrl}/auth?source=cli`,
       loginCommand: `npx indiecorns login --app-url ${appUrl}`,
       signupCommand: `npx indiecorns signup --app-url ${appUrl}`,
       statusCommand: "npx indiecorns status --json",
@@ -1861,27 +1919,79 @@ const resolveProfileInput = async ({
 }
 
 const createCliSession = async (appUrl) => {
-  const response = await fetch(`${appUrl}/api/cli/sessions`, {
+  const metadata = {
+    cliVersion: getCliVersion(),
+    nodeVersion: process.version,
+    platform: osPlatform(),
+    architecture: osArch(),
+  }
+  const modernResponse = await fetch(`${appUrl}/api/public/cli/session`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      cliVersion: getCliVersion(),
-      nodeVersion: process.version,
-      platform: osPlatform(),
-      architecture: osArch(),
-    }),
+    body: JSON.stringify(metadata),
   })
 
-  if (!response.ok) {
-    throw new Error("Unable to create a CLI auth session.")
+  if (modernResponse.ok) {
+    const session = await modernResponse.json()
+    if (session.code && session.verification_url) {
+      return {
+        ...session,
+        authMode: "device_code",
+        id: session.code,
+      }
+    }
   }
 
-  return response.json()
+  const legacyResponse = await fetch(`${appUrl}/api/cli/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(metadata),
+  })
+  if (!legacyResponse.ok) {
+    throw new Error("Unable to create a CLI auth session.")
+  }
+  return { ...(await legacyResponse.json()), authMode: "legacy" }
 }
 
-const pollCliSession = async ({ appUrl, id, secret }) => {
+const pollCliSession = async ({
+  appUrl,
+  id,
+  secret,
+  code,
+  pollUrl,
+  exchangeUrl,
+  authMode,
+}) => {
+  if (authMode === "device_code" || code || pollUrl) {
+    const deviceCode = code ?? id
+    const pollEndpoint =
+      pollUrl ?? `${appUrl}/api/public/cli/session/${encodeURIComponent(deviceCode)}`
+    const response = await fetch(pollEndpoint)
+    if (response.status === 404) return { status: "not_found" }
+    if (!response.ok) return { status: "error" }
+    const session = await response.json()
+    if (session.status !== "completed") return session
+
+    const exchangeEndpoint =
+      exchangeUrl ??
+      `${appUrl}/api/public/cli/session/${encodeURIComponent(deviceCode)}/exchange`
+    const exchange = await fetch(exchangeEndpoint, { method: "POST" })
+    if (exchange.status === 410) {
+      return { status: "expired", ...(await exchange.json()) }
+    }
+    if (!exchange.ok) return { status: "error" }
+    const token = await exchange.json()
+    return {
+      status: "completed",
+      completedAt: session.completed_at,
+      token: token.token,
+      tokenExpiresAt: token.token_expires_at,
+      userId: token.user_id,
+    }
+  }
+
   const url = new URL(`${appUrl}/api/cli/sessions`)
   url.searchParams.set("id", id)
   url.searchParams.set("secret", secret)
@@ -1902,9 +2012,10 @@ const getOnboardingActionsFromApp = async (flags) => {
 
   let response
   try {
-    response = await fetch(`${getAppUrl(flags)}/api/onboarding/actions`, {
-      headers,
-    })
+    response = await fetch(
+      `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/tasks", "/api/onboarding/actions")}`,
+      { headers }
+    )
   } catch {
     return null
   }
@@ -1913,7 +2024,20 @@ const getOnboardingActionsFromApp = async (flags) => {
     return null
   }
 
-  return response.json()
+  const body = await response.json()
+  if (usesPublicCliApi() && Array.isArray(body.tasks)) {
+    return {
+      ...body,
+      actions: body.tasks.map((task) => ({
+        ...task,
+        id: task.key,
+        url: task.action_url,
+        credits: task.points,
+        requires: task.depends_on ?? [],
+      })),
+    }
+  }
+  return body
 }
 
 const saveOnboardingActionToApp = async ({
@@ -1925,6 +2049,11 @@ const saveOnboardingActionToApp = async ({
   const headers = getCliAuthHeaders()
   if (!headers) {
     return null
+  }
+  // The modern API completes tasks from verifiable profile/event/session data.
+  // It intentionally has no generic "mark complete" endpoint.
+  if (usesPublicCliApi()) {
+    return { saved: false, verificationRequired: true }
   }
 
   const response = await fetch(`${getAppUrl(flags)}/api/onboarding/actions`, {
@@ -1953,7 +2082,9 @@ const getExternalActionEventsFromApp = async (flags) => {
     return null
   }
 
-  const url = new URL(`${getAppUrl(flags)}/api/onboarding/events`)
+  const url = new URL(
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/events", "/api/onboarding/events")}`
+  )
   if (flags.action) {
     url.searchParams.set("actionId", flags.action)
   }
@@ -1980,7 +2111,24 @@ const getExternalActionEventsFromApp = async (flags) => {
     return null
   }
 
-  return response.json()
+  const body = await response.json()
+  if (usesPublicCliApi() && Array.isArray(body.events)) {
+    return {
+      ...body,
+      events: body.events.map((event) => ({
+        ...event,
+        platform: event.target_platform,
+        event_type: event.action_type,
+        target_profile_url: event.target_url,
+        observed_label_before: event.before_label,
+        observed_label_after: event.after_label,
+        evidence_url: event.proof_url,
+        updated_at: event.verified_at ?? event.occurred_at,
+        created_at: event.occurred_at,
+      })),
+    }
+  }
+  return body
 }
 
 const summarizeExternalActionEvents = (events) => {
@@ -2060,7 +2208,9 @@ const getExternalProfilesFromApp = async (flags) => {
     return null
   }
 
-  const url = new URL(`${getAppUrl(flags)}/api/users/external-profiles`)
+  const url = new URL(
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/external-profiles", "/api/users/external-profiles")}`
+  )
   if (flags.platform && flags.platform !== "all") {
     url.searchParams.set("platform", flags.platform)
   }
@@ -2081,7 +2231,7 @@ const getIndieHackersAutofillPlanFromApp = async (flags) => {
   }
 
   const response = await fetch(
-    `${getAppUrl(flags)}/api/users/indiehackers/autofill`,
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/indiehackers-autofill", "/api/users/indiehackers/autofill")}`,
     { headers }
   )
 
@@ -2098,7 +2248,9 @@ const getCommunityActionTargetsFromApp = async (flags) => {
     return null
   }
 
-  const url = new URL(`${getAppUrl(flags)}/api/community/action-targets`)
+  const url = new URL(
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/community-targets", "/api/community/action-targets")}`
+  )
   if (flags.platform && flags.platform !== "all") {
     url.searchParams.set("platform", flags.platform)
   }
@@ -2215,25 +2367,33 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
   }
 
   const response = await fetch(
-    `${getAppUrl(flags)}/api/users/external-profiles`,
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/external-profiles", "/api/users/external-profiles")}`,
     {
       method: "POST",
       headers: {
         ...headers,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        platform: normalizedPlatform,
-        username: localUsername,
-        profileUrl,
-        displayName: flags["display-name"],
-        source:
-          flags.source ??
-          (resolved.resolution.method === "browser_redirect"
-            ? "cli_browser_resolved"
-            : "cli"),
-        confidence: flags.confidence ?? "user_verified",
-      }),
+      body: JSON.stringify(
+        usesPublicCliApi()
+          ? {
+              platform: normalizedPlatform,
+              url: profileUrl,
+              username: localUsername,
+            }
+          : {
+              platform: normalizedPlatform,
+              username: localUsername,
+              profileUrl,
+              displayName: flags["display-name"],
+              source:
+                flags.source ??
+                (resolved.resolution.method === "browser_redirect"
+                  ? "cli_browser_resolved"
+                  : "cli"),
+              confidence: flags.confidence ?? "user_verified",
+            }
+      ),
     }
   )
 
@@ -2264,7 +2424,12 @@ const saveExternalProfileToApp = async ({ flags, platform }) => {
       confidence: body.profile.confidence ?? "user_verified",
     })
   }
-  return { ...body, resolution: resolved.resolution }
+  return {
+    ...body,
+    saved: body.saved ?? body.ok ?? false,
+    profile: body.profile ?? localProfile,
+    resolution: resolved.resolution,
+  }
 }
 
 const saveCommunityLaunchToApp = async ({ flags, platform }) => {
@@ -2291,21 +2456,38 @@ const saveCommunityLaunchToApp = async ({ flags, platform }) => {
     }
   }
 
-  const response = await fetch(`${getAppUrl(flags)}/api/community/launches`, {
+  const response = await fetch(
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/launches", "/api/community/launches")}`,
+    {
     method: "POST",
     headers: {
       ...headers,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      platform,
-      launchUrl: normalizedLaunchUrl,
-      name: flags.name ?? flags["display-name"],
-      description: flags.description,
-      imageUrl: flags["image-url"],
-      launchedAt: flags["launched-at"],
-      status: flags.status,
-    }),
+    body: JSON.stringify(
+      usesPublicCliApi()
+        ? {
+            platform,
+            url: normalizedLaunchUrl,
+            title:
+              flags.name ??
+              flags["display-name"] ??
+              safeUrl(normalizedLaunchUrl)?.pathname.split("/").filter(Boolean).at(-1) ??
+              `${platform} launch`,
+            tagline: flags.description,
+            launched_at: flags["launched-at"],
+            status: flags.status,
+          }
+        : {
+            platform,
+            launchUrl: normalizedLaunchUrl,
+            name: flags.name ?? flags["display-name"],
+            description: flags.description,
+            imageUrl: flags["image-url"],
+            launchedAt: flags["launched-at"],
+            status: flags.status,
+          }
+    ),
   })
 
   if (!response.ok) {
@@ -2333,7 +2515,9 @@ const getCommunityLaunchesFromApp = async ({ flags, platform }) => {
     return null
   }
 
-  const url = new URL(`${getAppUrl(flags)}/api/community/launches`)
+  const url = new URL(
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/launches", "/api/community/launches")}`
+  )
   if (platform && platform !== "all") {
     url.searchParams.set("platform", platform)
   }
@@ -2382,19 +2566,30 @@ const saveCommunityPostToApp = async ({ flags, platform }) => {
     }
   }
 
-  const response = await fetch(`${getAppUrl(flags)}/api/community/posts`, {
+  const response = await fetch(
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/posts", "/api/community/posts")}`,
+    {
     method: "POST",
     headers: {
       ...headers,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      platform,
-      postUrl: normalizedPostUrl,
-      title: flags.title ?? flags.name ?? flags["display-name"],
-      authorUsername: flags.author ?? flags["author-username"],
-      status: flags.status,
-    }),
+    body: JSON.stringify(
+      usesPublicCliApi()
+        ? {
+            platform,
+            url: normalizedPostUrl,
+            title: flags.title ?? flags.name ?? flags["display-name"],
+            status: flags.status,
+          }
+        : {
+            platform,
+            postUrl: normalizedPostUrl,
+            title: flags.title ?? flags.name ?? flags["display-name"],
+            authorUsername: flags.author ?? flags["author-username"],
+            status: flags.status,
+          }
+    ),
   })
 
   if (!response.ok) {
@@ -2428,7 +2623,9 @@ const getCommunityPostsFromApp = async ({ flags, platform }) => {
   const platforms = platform === "all" ? ["x", "linkedin"] : [platform]
   const posts = []
   for (const item of platforms) {
-    const url = new URL(`${getAppUrl(flags)}/api/community/posts`)
+    const url = new URL(
+      `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/posts", "/api/community/posts")}`
+    )
     url.searchParams.set("platform", item)
     if (flags.status) {
       url.searchParams.set("status", flags.status)
@@ -2514,44 +2711,70 @@ const saveExternalActionEventToApp = async ({
     return null
   }
 
-  const response = await fetch(`${getAppUrl(flags)}/api/onboarding/events`, {
+  const response = await fetch(
+    `${getAppUrl(flags)}${getCliEndpoint("/api/public/cli/events", "/api/onboarding/events")}`,
+    {
     method: "POST",
     headers: {
       ...headers,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      actionId,
-      platform,
-      eventType,
-      status: flags.status ?? status,
-      actorUsername: flags.actor ?? flags["actor-username"],
-      targetUsername,
-      targetDisplayName: flags["display-name"],
-      targetProfileUrl,
-      source: flags.source ?? "agent",
-      observedLabelBefore: flags["label-before"],
-      observedLabelAfter: flags["label-after"],
-      evidenceUrl: flags["evidence-url"],
-      metadata: {
-        recordedBy: "indiecorns-cli",
-        targetType,
-        ...(rating ? { rating, peerlistRating: { rating, maxRating: 5 } } : {}),
-        ...(queueKey ? { queueKey } : {}),
-      },
-    }),
+    body: JSON.stringify(
+      usesPublicCliApi()
+        ? {
+            target_platform: platform,
+            target_type: targetType,
+            action_type: eventType,
+            target_url: targetProfileUrl,
+            target_username: targetUsername,
+            before_label: flags["label-before"],
+            after_label: flags["label-after"],
+            verification_note: flags.note,
+            proof_url: flags["evidence-url"],
+            proof_kind: flags["proof-kind"],
+            idempotency_key: queueKey
+              ? `cli:${queueKey}`
+              : `cli:${platform}:${eventType}:${randomUUID()}`,
+          }
+        : {
+            actionId,
+            platform,
+            eventType,
+            status: flags.status ?? status,
+            actorUsername: flags.actor ?? flags["actor-username"],
+            targetUsername,
+            targetDisplayName: flags["display-name"],
+            targetProfileUrl,
+            source: flags.source ?? "agent",
+            observedLabelBefore: flags["label-before"],
+            observedLabelAfter: flags["label-after"],
+            evidenceUrl: flags["evidence-url"],
+            metadata: {
+              recordedBy: "indiecorns-cli",
+              targetType,
+              ...(rating
+                ? { rating, peerlistRating: { rating, maxRating: 5 } }
+                : {}),
+              ...(queueKey ? { queueKey } : {}),
+            },
+          }
+    ),
   })
 
   if (!response.ok) {
     return null
   }
 
-  return response.json()
+  const body = await response.json()
+  return usesPublicCliApi()
+    ? { ...body, saved: body.saved ?? body.ok ?? false }
+    : body
 }
 
 const saveCompletedSession = ({ appUrl, session, id, secret }) => {
   const config = readConfig()
   const authenticatedAt = session.completedAt ?? new Date().toISOString()
+  const modernSession = Boolean(session.token)
   writeConfig({
     ...config,
     pendingCliSession: undefined,
@@ -2564,8 +2787,13 @@ const saveCompletedSession = ({ appUrl, session, id, secret }) => {
       nodeVersion: session.nodeVersion,
       platform: session.platform,
       architecture: session.architecture,
-      cliSessionId: id,
-      cliSecret: secret,
+      ...(modernSession
+        ? {
+            authMode: "device_code",
+            accessToken: session.token,
+            tokenExpiresAt: session.tokenExpiresAt,
+          }
+        : { authMode: "legacy", cliSessionId: id, cliSecret: secret }),
     },
   })
 }
@@ -2580,24 +2808,28 @@ const saveCliInstallAction = async (appUrl) =>
     source: "cli",
   })
 
-const markCliInstalled = async (appUrl) => {
+const markCliInstalled = async (appUrl, { serverAlreadyRecorded = false } = {}) => {
   const [savedAction, pluginInstall] = await Promise.all([
-    saveCliInstallAction(appUrl),
-    installPluginBundle(),
+    serverAlreadyRecorded
+      ? Promise.resolve({ saved: true, source: "device_code_exchange" })
+      : saveCliInstallAction(appUrl),
+    Promise.resolve(installPluginBundle()),
   ])
 
   return { savedAction, pluginInstall }
 }
 
-const waitForAppCliSession = async ({ appUrl, id, secret, timeoutSeconds }) => {
+const waitForAppCliSession = async ({ appUrl, id, secret, session: pending, timeoutSeconds }) => {
   const deadline = Date.now() + timeoutSeconds * 1000
 
   while (Date.now() < deadline) {
-    const session = await pollCliSession({ appUrl, id, secret })
+    const session = await pollCliSession({ appUrl, id, secret, ...pending })
 
     if (session.status === "completed") {
       saveCompletedSession({ appUrl, session, id, secret })
-      const installResult = await markCliInstalled(appUrl)
+      const installResult = await markCliInstalled(appUrl, {
+        serverAlreadyRecorded: Boolean(session.token),
+      })
       return { ...session, ...installResult }
     }
 
@@ -2617,38 +2849,47 @@ const runBrowserAuth = async (flags, mode = "login") => {
   const timeoutSeconds = Number.parseInt(flags.timeout ?? "180", 10)
   const safeTimeoutSeconds =
     Number.isFinite(timeoutSeconds) && timeoutSeconds > 0 ? timeoutSeconds : 180
-  const authUrl = new URL(`${appUrl}/${route}`)
+  let authUrl = new URL(`${appUrl}/${route}`)
   const action =
     mode === "signup"
       ? "Create your Indiecorns account"
       : "Sign in to Indiecorns"
   authUrl.searchParams.set("source", "cli")
 
-  let cliSession = null
-  if (!flags.json) {
-    cliSession = await withSpinner(
-      "Preparing your Indiecorns sign-in link...",
-      () => createCliSession(appUrl),
-      ok("Sign-in link is ready.")
-    )
+  const cliSession = flags.json
+    ? await createCliSession(appUrl)
+    : await withSpinner(
+        "Preparing your Indiecorns sign-in link...",
+        () => createCliSession(appUrl),
+        ok("Sign-in link is ready.")
+      )
+  if (cliSession.authMode === "device_code") {
+    authUrl = new URL(cliSession.verification_url)
+  } else {
     authUrl.searchParams.set("cli_session", cliSession.id)
     authUrl.searchParams.set("cli_secret", cliSession.secret)
-    writeConfig({
-      ...readConfig(),
-      pendingCliSession: {
-        appUrl,
-        id: cliSession.id,
-        secret: cliSession.secret,
-        createdAt: new Date().toISOString(),
-      },
-    })
   }
+  writeConfig({
+    ...readConfig(),
+    pendingCliSession: {
+      appUrl,
+      id: cliSession.id,
+      secret: cliSession.secret,
+      code: cliSession.code,
+      pollUrl: cliSession.poll_url,
+      exchangeUrl: cliSession.exchange_url,
+      authMode: cliSession.authMode,
+      createdAt: new Date().toISOString(),
+    },
+  })
 
   if (flags.json) {
     printJson({
       status: "browser_auth_required",
       mode,
       url: authUrl.toString(),
+      code: cliSession.code ?? undefined,
+      expiresAt: cliSession.expires_at ?? undefined,
       message: `Open the ${mode} URL to continue with Indiecorns.`,
     })
     return 0
@@ -2689,6 +2930,7 @@ const runBrowserAuth = async (flags, mode = "login") => {
           appUrl,
           id: cliSession.id,
           secret: cliSession.secret,
+          session: cliSession,
           timeoutSeconds: safeTimeoutSeconds,
         }),
       ok("Indiecorns and this terminal are connected.")
@@ -2754,7 +2996,11 @@ const runAuthStatus = async (flags) => {
   }
 
   const config = readConfig()
-  if (config.pendingCliSession?.id && config.pendingCliSession?.secret) {
+  if (
+    config.pendingCliSession?.id &&
+    (config.pendingCliSession?.secret ||
+      config.pendingCliSession?.authMode === "device_code")
+  ) {
     const session = await pollCliSession(config.pendingCliSession)
     if (session.status === "completed") {
       saveCompletedSession({
@@ -2763,9 +3009,9 @@ const runAuthStatus = async (flags) => {
         id: config.pendingCliSession.id,
         secret: config.pendingCliSession.secret,
       })
-      const installResult = await markCliInstalled(
-        config.pendingCliSession.appUrl
-      )
+      const installResult = await markCliInstalled(config.pendingCliSession.appUrl, {
+        serverAlreadyRecorded: Boolean(session.token),
+      })
 
       const result = {
         authenticated: true,

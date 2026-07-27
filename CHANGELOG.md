@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.35 - 2026-07-27
+
+- Switch the default app to the migrated Indiecorns production app and use its
+  device-code login flow with a single-use exchange and 30-day Bearer token.
+- Route tasks, agent plans, profiles, community targets, events, launches,
+  posts, and Indie Hackers autofill through the new stable public CLI API.
+- Preserve the legacy session-header and endpoint contract as a fallback for
+  older deployments during the cutover.
+- Add an end-to-end local API test covering login, polling, single exchange,
+  Bearer authentication, tasks, profile saves, launches, posts, and events.
+
 ## 0.3.34 - 2026-07-20
 
 - Cache `profile set` values locally so existing profiles remain available when

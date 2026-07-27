@@ -43,9 +43,11 @@ The wizard follows the best setup-CLI pattern: one terminal session, clear
 progress, browser auth only when needed, and structured output for agents.
 
 `npx indiecorns login` opens the browser, waits for the Indiecorns app to finish
-Google sign-in, and confirms the local CLI session in the terminal. On a remote
-machine or in automation, pass `--no-open` to print the login URL without
-launching a browser.
+sign-in, and confirms the local CLI session in the terminal. The migrated app
+uses a short-lived device code and returns a single-use 30-day access token;
+the CLI stores it in `~/.indiecorns/config.json` with user-only permissions and
+never prints it. On a remote machine or in automation, pass `--no-open` to
+print the login URL without launching a browser.
 
 ## Agent Workflows
 
@@ -188,7 +190,7 @@ environment files are excluded from the public tarball.
 ## Support
 
 - Website: https://indiecorns.com
-- App: https://app.indiecorns.com
+- App: https://indiecorns.lovable.app
 - Source: https://github.com/danielsinewe/indiecorns-cli
 - Issues: https://github.com/danielsinewe/indiecorns-cli/issues
 
