@@ -84,7 +84,7 @@ test("device-code login exchanges once and uses Bearer auth", async () => {
         readiness: {
           cliSession: false,
           blockedAuth: true,
-          nextCommand: "npx indiecorns login",
+          nextCommand: "npx --yes indiecorns@latest",
         },
         nextAction: {
           id: "cli_install",
@@ -232,7 +232,10 @@ test("device-code login exchanges once and uses Bearer auth", async () => {
     assert.notEqual(taskBody.tasks[0].agentCapability, "blocked_auth")
     assert.equal(taskBody.readiness.cliSession, true)
     assert.equal(taskBody.readiness.blockedAuth, false)
-    assert.notEqual(taskBody.readiness.nextCommand, "npx indiecorns login")
+    assert.notEqual(
+      taskBody.readiness.nextCommand,
+      "npx --yes indiecorns@latest",
+    )
 
     publicApiAvailable = false
     const fallbackTasks = await runCli({

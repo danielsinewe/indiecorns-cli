@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.37 - 2026-07-31
+
+- Ignore stale server readiness commands that point back to an already
+  completed CLI bootstrap action.
+- Keep human and agent output aligned on the next unfinished quick-start task.
+
 ## 0.3.36 - 2026-07-31
 
 - Restore `app.indiecorns.com` as the production API and browser-auth host.

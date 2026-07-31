@@ -1331,10 +1331,19 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
       }
     : null
   const serverNextAction = plan?.nextAction
+  const preferredNextAction =
+    QUICK_START_ACTION_IDS.map((actionId) =>
+      actions.find(
+        (action) =>
+          action.id === actionId && action.status !== "completed"
+      )
+    ).find(Boolean) ??
+    actions.find((action) => action.status !== "completed") ??
+    null
   const nextAction =
     authenticated &&
     normalizeCliActionId(serverNextAction?.id) === CLI_INSTALL_ACTION_ID
-      ? actions.find((action) => action.status !== "completed") ?? null
+      ? preferredNextAction
       : serverNextAction ?? bootstrapNextAction
   const fallbackReadiness = {
     cliSession: authenticated,
@@ -1345,11 +1354,23 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
     blockedAuth: !authenticated,
     blockedPlatformLogin: false,
     nextCommand:
-      remainingCommands[0] ?? `npx indiecorns agent --app-url ${appUrl}`,
+      preferredNextAction?.agentCommand ??
+      preferredNextAction?.command ??
+      `npx indiecorns agent --app-url ${appUrl}`,
   }
   const serverNextCommand = plan?.readiness?.nextCommand
+  const serverNextCommandIsCompleted = actions.some(
+    (action) =>
+      action.status === "completed" &&
+      [action.command, action.agentCommand].includes(serverNextCommand)
+  )
+  const serverNextCommandIsBootstrap =
+    /^npx\s+(?:--yes\s+)?indiecorns(?:@latest)?(?:\s+login)?(?:\s+--app-url\s+\S+)?$/.test(
+      serverNextCommand ?? ""
+    )
   const nextCommand =
-    authenticated && /\bindiecorns\s+login\b/.test(serverNextCommand ?? "")
+    authenticated &&
+    (serverNextCommandIsBootstrap || serverNextCommandIsCompleted)
       ? fallbackReadiness.nextCommand
       : serverNextCommand ?? fallbackReadiness.nextCommand
 
