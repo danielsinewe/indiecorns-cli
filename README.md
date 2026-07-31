@@ -10,12 +10,12 @@ environments.
 Run the CLI directly with npm:
 
 ```bash
-npx indiecorns
+npx --yes indiecorns@latest
 ```
 
-The default command starts the CLI-first wizard: it analyzes the local
-environment, checks auth, checks the agent plugin, summarizes onboarding
-credits, and then routes the user to the next command.
+The default command opens secure browser sign-in when needed, waits for the
+handoff, installs the agent plugin, and continues to the next setup action.
+There is no separate login command during first-run setup.
 
 Or install it globally:
 
@@ -42,8 +42,9 @@ npx indiecorns doctor
 The wizard follows the best setup-CLI pattern: one terminal session, clear
 progress, browser auth only when needed, and structured output for agents.
 
-`npx indiecorns login` opens the browser, waits for the Indiecorns app to finish
-sign-in, and confirms the local CLI session in the terminal. The migrated app
+`npx indiecorns login` reconnects an existing CLI installation. It opens the
+browser, waits for the Indiecorns app to finish sign-in, and confirms the local
+CLI session in the terminal. The app
 uses a short-lived device code and returns a single-use 30-day access token;
 the CLI stores it in `~/.indiecorns/config.json` with user-only permissions and
 never prints it. On a remote machine or in automation, pass `--no-open` to

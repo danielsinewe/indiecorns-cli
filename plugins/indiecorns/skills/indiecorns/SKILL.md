@@ -63,17 +63,19 @@ plugin, inspect tasks, or run onboarding actions.
 
 ## Authentication
 
-Interactive users should run:
+Interactive first-time users should run:
 
 ```bash
-npx indiecorns login
+npx --yes indiecorns@latest
 ```
 
-The CLI should open the browser, wait for app auth to finish, then report
-`Authenticated.` in the terminal. A successful login also installs the local
-`indiecorns` agent plugin into the user's plugin marketplace so Codex can load
-the Indiecorns skill without a separate manual setup step. On remote machines or
-non-browser contexts, use:
+The CLI opens the browser, reuses an existing Indiecorns web session when
+available, waits for app auth to finish, then continues to the first unfinished
+setup action in the same terminal command. A successful handoff also installs
+the local `indiecorns` agent plugin into the user's plugin marketplace so Codex can load
+the Indiecorns skill without a separate manual setup step. Use `login` only to
+reconnect an existing installation. On remote machines or non-browser contexts,
+use:
 
 ```bash
 npx indiecorns login --no-open

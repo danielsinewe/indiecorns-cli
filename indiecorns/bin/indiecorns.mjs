@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const DEFAULT_APP_URL = "https://indiecorns.lovable.app"
+const DEFAULT_APP_URL = "https://app.indiecorns.com"
 const DEFAULT_POSTHOG_KEY = "phc_DkrgYsexPgXyGqsCm3nPP4wFT6GSQaxaLZzGx4RpABtV"
 const CLI_INSTALL_ACTION_ID = "cli"
 const QUICK_START_ACTION_IDS = [
@@ -34,7 +34,7 @@ const ONBOARDING_ACTIONS = [
     credits: 100,
     url: "https://www.npmjs.com/package/indiecorns",
     kind: "command",
-    command: "npx indiecorns login",
+    command: "npx --yes indiecorns@latest",
     verification: "cli_session",
     required: true,
   },
@@ -81,7 +81,7 @@ Commands:
   support-assist <request>       Ask the agent to plan member support targets
   collective                     Show the CLI-first collective command center
   init                           Alias for wizard
-  login                          Sign in to Indiecorns in your browser
+  login                          Reconnect this CLI to your Indiecorns account
   signup                         Create an Indiecorns account in your browser
   status                         Show CLI authentication status
   tasks                          Show the next setup step
@@ -1151,7 +1151,12 @@ const getBrowserAssist = (action) => {
 }
 
 const getAgentCapability = (action, authenticated) => {
-  if (action.agentCapability) return action.agentCapability
+  if (
+    action.agentCapability &&
+    !(authenticated && action.agentCapability === "blocked_auth")
+  ) {
+    return action.agentCapability
+  }
   if (!authenticated && action.id !== CLI_INSTALL_ACTION_ID)
     return "blocked_auth"
   if (action.kind === "command") return "cli_direct"
@@ -1183,6 +1188,9 @@ const usesPublicCliApi = () => Boolean(getCliAccessToken())
 
 const getCliEndpoint = (modernPath, legacyPath) =>
   usesPublicCliApi() ? modernPath : legacyPath
+
+const normalizeCliActionId = (id) =>
+  id === "cli_install" ? CLI_INSTALL_ACTION_ID : id
 
 const getCliAuthHeaders = () => {
   const accessToken = getCliAccessToken()
@@ -1231,7 +1239,7 @@ const getAgentPlanFromApp = async (flags) => {
         ...body,
         actions: body.plan.map((item) => ({
           ...item,
-          id: item.key,
+          id: normalizeCliActionId(item.key),
           kind: item.action_url ? "open_url" : "command",
           url: item.action_url,
           targetUrl: item.action_url,
@@ -1257,7 +1265,16 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
   const extensionUrl =
     plan?.desktopAutomation?.extensionUrl ?? getExtensionUrl(flags)
   const authenticated = hasToken() || hasBrowserSession()
-  const actions = plan?.actions ?? fallback.actions
+  const actions = (plan?.actions ?? fallback.actions).map((action) => {
+    const id = normalizeCliActionId(action.id)
+    return {
+      ...action,
+      id,
+      ...(authenticated && id === CLI_INSTALL_ACTION_ID
+        ? { status: "completed" }
+        : {}),
+    }
+  })
   const completedCount = actions.filter(
     (action) => action.status === "completed"
   ).length
@@ -1313,6 +1330,28 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
         },
       }
     : null
+  const serverNextAction = plan?.nextAction
+  const nextAction =
+    authenticated &&
+    normalizeCliActionId(serverNextAction?.id) === CLI_INSTALL_ACTION_ID
+      ? actions.find((action) => action.status !== "completed") ?? null
+      : serverNextAction ?? bootstrapNextAction
+  const fallbackReadiness = {
+    cliSession: authenticated,
+    pluginRequired: true,
+    extensionUseful: actions.some(
+      (action) => getBrowserAssist(action).required
+    ),
+    blockedAuth: !authenticated,
+    blockedPlatformLogin: false,
+    nextCommand:
+      remainingCommands[0] ?? `npx indiecorns agent --app-url ${appUrl}`,
+  }
+  const serverNextCommand = plan?.readiness?.nextCommand
+  const nextCommand =
+    authenticated && /\bindiecorns\s+login\b/.test(serverNextCommand ?? "")
+      ? fallbackReadiness.nextCommand
+      : serverNextCommand ?? fallbackReadiness.nextCommand
 
   return {
     app: "indiecorns",
@@ -1364,18 +1403,14 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
       remainingCommands,
       requiredFirstActionId: CLI_INSTALL_ACTION_ID,
     },
-    readiness: plan?.readiness ?? {
+    readiness: {
+      ...fallbackReadiness,
+      ...(plan?.readiness ?? {}),
       cliSession: authenticated,
-      pluginRequired: true,
-      extensionUseful: actions.some(
-        (action) => getBrowserAssist(action).required
-      ),
       blockedAuth: !authenticated,
-      blockedPlatformLogin: false,
-      nextCommand:
-        remainingCommands[0] ?? `npx indiecorns agent --app-url ${appUrl}`,
+      nextCommand,
     },
-    nextAction: plan?.nextAction ?? bootstrapNextAction,
+    nextAction,
     desktopAutomation: plan?.desktopAutomation ?? {
       available: actions.some((action) => getBrowserAssist(action).required),
       extensionId,
@@ -1456,9 +1491,13 @@ const getAgentPlan = async (flags) => {
   const appPlan = await getAgentPlanFromApp(flags)
   const appActions = (await getOnboardingActionsFromApp(flags))?.actions
   const fallbackActions = appActions?.length ? appActions : ONBOARDING_ACTIONS
-  const fallbackTaskOutputs = fallbackActions.map((action) =>
-    toTaskOutput(action, flags)
-  )
+  const authenticated = hasToken() || hasBrowserSession()
+  const fallbackTaskOutputs = fallbackActions.map((action) => {
+    const output = toTaskOutput(action, flags)
+    return authenticated && output.id === CLI_INSTALL_ACTION_ID
+      ? { ...output, status: "completed" }
+      : output
+  })
 
   await trackCliEvent(
     appPlan ? "agent_plan_loaded" : "agent_plan_fallback",
@@ -2030,7 +2069,7 @@ const getOnboardingActionsFromApp = async (flags) => {
       ...body,
       actions: body.tasks.map((task) => ({
         ...task,
-        id: task.key,
+        id: normalizeCliActionId(task.key),
         url: task.action_url,
         credits: task.points,
         requires: task.depends_on ?? [],
@@ -2952,9 +2991,7 @@ const runBrowserAuth = async (flags, mode = "login") => {
         )
       }
       console.log("")
-      console.log(`${bold("Next:")} npx indiecorns tasks`)
-      console.log(dim("Tip: agents can use npx indiecorns agent for JSON."))
-      return 0
+      return runWizard(flags)
     }
 
     section("Still waiting")
@@ -6215,6 +6252,15 @@ const runWizard = async (flags) => {
     return report.setup.rows.some((row) => row.status === "fail") ? 1 : 0
   }
 
+  if (
+    !hasToken() &&
+    !hasBrowserSession() &&
+    process.stdout.isTTY &&
+    !flags["no-open"]
+  ) {
+    return runBrowserAuth(flags, "login")
+  }
+
   const report = await withSpinner(
     "Checking your Indiecorns setup...",
     () => getWizardReport(flags),
@@ -6258,21 +6304,9 @@ const runWizard = async (flags) => {
   }
 
   if (!report.authenticated) {
-    section("Next step")
-    console.log(`  ${ok(report.commands.login)}`)
-    console.log(
-      "  Sign in once to connect this CLI to your Indiecorns account."
-    )
-
-    if (process.stdout.isTTY && !flags["no-open"]) {
-      console.log("")
-      console.log("Starting browser sign-in now.")
-      return runBrowserAuth(flags, "login")
-    }
-
-    console.log("")
-    console.log("For automation:")
-    console.log(`  ${ok("npx indiecorns wizard --ndjson --no-open")}`)
+    section("Connect")
+    console.log(`  ${ok("npx indiecorns login --no-open")}`)
+    console.log("  Open the secure link on a machine with a browser.")
     return 0
   }
 

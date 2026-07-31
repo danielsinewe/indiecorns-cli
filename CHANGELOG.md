@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.36 - 2026-07-31
+
+- Restore `app.indiecorns.com` as the production API and browser-auth host.
+- Make `npx --yes indiecorns@latest` complete browser sign-in and continue to
+  the real next setup action without separate `login` or `tasks` commands.
+- Keep the CLI install step completed from a valid local token when the task
+  API is temporarily unavailable, and normalize the API's `cli_install` key.
+
 ## 0.3.35 - 2026-07-27
 
 - Switch the default app to the migrated Indiecorns production app and use its

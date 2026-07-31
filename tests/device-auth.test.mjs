@@ -27,6 +27,7 @@ test("device-code login exchanges once and uses Bearer auth", async () => {
   const requests = []
   const requestBodies = []
   let completed = false
+  let publicApiAvailable = true
   let origin = ""
 
   const server = createServer(async (request, response) => {
@@ -72,9 +73,24 @@ test("device-code login exchanges once and uses Bearer auth", async () => {
       return
     }
     if (request.method === "GET" && request.url?.startsWith("/api/public/cli/agent-plan")) {
+      if (!publicApiAvailable) {
+        response.statusCode = 503
+        response.end(JSON.stringify({ error: "unavailable" }))
+        return
+      }
       assert.equal(request.headers.authorization, "Bearer ic_test_token")
       response.end(JSON.stringify({
         credits: 100,
+        readiness: {
+          cliSession: false,
+          blockedAuth: true,
+          nextCommand: "npx indiecorns login",
+        },
+        nextAction: {
+          id: "cli_install",
+          title: "Install the CLI",
+          status: "pending",
+        },
         plan: [{
           key: "cli_install",
           title: "Install the CLI",
@@ -86,11 +102,17 @@ test("device-code login exchanges once and uses Bearer auth", async () => {
           depends_on: [],
           missing_deps: [],
           status: "completed",
+          agentCapability: "blocked_auth",
         }],
       }))
       return
     }
     if (request.method === "GET" && request.url === "/api/public/cli/tasks") {
+      if (!publicApiAvailable) {
+        response.statusCode = 503
+        response.end(JSON.stringify({ error: "unavailable" }))
+        return
+      }
       assert.equal(request.headers.authorization, "Bearer ic_test_token")
       response.end(JSON.stringify({
         credits: 100,
@@ -206,7 +228,24 @@ test("device-code login exchanges once and uses Bearer auth", async () => {
     assert.equal(taskBody.authenticated, true)
     assert.equal(taskBody.summary.total, 1)
     assert.equal(taskBody.summary.completed, 1)
-    assert.equal(taskBody.tasks[0].id, "cli_install")
+    assert.equal(taskBody.tasks[0].id, "cli")
+    assert.notEqual(taskBody.tasks[0].agentCapability, "blocked_auth")
+    assert.equal(taskBody.readiness.cliSession, true)
+    assert.equal(taskBody.readiness.blockedAuth, false)
+    assert.notEqual(taskBody.readiness.nextCommand, "npx indiecorns login")
+
+    publicApiAvailable = false
+    const fallbackTasks = await runCli({
+      home,
+      args: ["tasks", "--json", "--no-telemetry", "--app-url", origin],
+    })
+    assert.equal(fallbackTasks.code, 0, fallbackTasks.stderr)
+    const fallbackBody = JSON.parse(fallbackTasks.stdout)
+    assert.equal(fallbackBody.authenticated, true)
+    assert.equal(fallbackBody.tasks[0].id, "cli")
+    assert.equal(fallbackBody.tasks[0].status, "completed")
+
+    publicApiAvailable = true
 
     assert.equal(
       requests.filter((item) => item.url === "/api/public/cli/session/ABC123/exchange").length,
@@ -293,6 +332,24 @@ test("device-code login exchanges once and uses Bearer auth", async () => {
     assert.match(eventBody.idempotency_key, /^cli:x:like:/)
   } finally {
     await new Promise((resolveClose) => server.close(resolveClose))
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test("default dashboard uses the canonical production app", async () => {
+  const home = await mkdtemp(join(tmpdir(), "indiecorns-cli-url-test-"))
+
+  try {
+    const dashboard = await runCli({
+      home,
+      args: ["dashboard", "--json", "--no-telemetry"],
+    })
+    assert.equal(dashboard.code, 0, dashboard.stderr)
+    assert.equal(
+      JSON.parse(dashboard.stdout).url,
+      "https://app.indiecorns.com/dashboard",
+    )
+  } finally {
     await rm(home, { recursive: true, force: true })
   }
 })
