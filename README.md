@@ -91,6 +91,8 @@ npx indiecorns rate peerlist
 npx indiecorns peerlist-launches --agent
 npx indiecorns join peerlist
 npx indiecorns join slack
+npx indiecorns extension install
+npx indiecorns extension review
 npx indiecorns follow-members peerlist
 npx indiecorns follow-members x
 npx indiecorns follow-members producthunt
@@ -101,6 +103,11 @@ Social actions are external-platform actions. The CLI can open the destination
 and record progress in Indiecorns, but agents should only mark an action as
 complete after the action was actually performed in the user's signed-in browser
 session.
+
+The Chrome extension is the fourth quick-start action. Installation is worth
+zero credits and is verified only after the user opens the installed extension
+and signs in. Reviews are optional and should always reflect the user's honest
+experience.
 
 `follow-members` uses Indiecorns profile data to list or open member profiles on
 Peerlist, X, and Product Hunt. Use `--agent` or `--json` to get structured

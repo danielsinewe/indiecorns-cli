@@ -19,10 +19,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_APP_URL = "https://app.indiecorns.com"
 const DEFAULT_POSTHOG_KEY = "phc_DkrgYsexPgXyGqsCm3nPP4wFT6GSQaxaLZzGx4RpABtV"
 const CLI_INSTALL_ACTION_ID = "cli"
+const CHROME_EXTENSION_ACTION_ID = "chrome-extension"
 const QUICK_START_ACTION_IDS = [
   CLI_INSTALL_ACTION_ID,
   "external-profile-website",
   "discord",
+  CHROME_EXTENSION_ACTION_ID,
 ]
 const DEFAULT_EXTENSION_ID = "adohicablinejcgkglhedohifnieilbg"
 const enabledValues = new Set(["1", "true", "yes", "on"])
@@ -68,6 +70,25 @@ const ONBOARDING_ACTIONS = [
     verification: "external_platform",
     requires: [CLI_INSTALL_ACTION_ID],
   },
+  {
+    id: CHROME_EXTENSION_ACTION_ID,
+    aliases: [
+      "extension",
+      "chrome",
+      "chrome-extension",
+      "browser-extension",
+      "extension-install",
+    ],
+    title: "Try the Chrome extension",
+    description:
+      "Install it, run one task, and optionally share an honest review.",
+    credits: 0,
+    url: `https://chromewebstore.google.com/detail/${DEFAULT_EXTENSION_ID}`,
+    reviewUrl: `https://chrome.google.com/webstore/detail/${DEFAULT_EXTENSION_ID}/reviews`,
+    command: "npx indiecorns extension install",
+    verification: "extension_session",
+    requires: [CLI_INSTALL_ACTION_ID],
+  },
 ]
 
 const usage = `Indiecorns CLI
@@ -76,7 +97,7 @@ Usage:
   indiecorns [command] [options]
 
 Commands:
-  wizard                         Connect, add your website, and join Slack
+  wizard                         Connect, add your website, join Slack, and try the extension
   assist <request>               Ask the setup or support assistant for exact next commands
   support-assist <request>       Ask the agent to plan member support targets
   collective                     Show the CLI-first collective command center
@@ -116,6 +137,8 @@ Commands:
                                  Mark an already-finished task as complete
   dashboard                      Open your Indiecorns dashboard
   extension open                 Open the Indiecorns Chrome extension executor
+  extension install              Open the Chrome Web Store listing
+  extension review               Open the optional Chrome Web Store review page
   agent                          Print a Codex-ready JSON action plan
   plugin install                 Install the Indiecorns Codex plugin locally
   telemetry status               Show CLI telemetry status
@@ -329,6 +352,12 @@ const getExtensionId = (flags = {}) =>
 
 const getExtensionUrl = (flags = {}) =>
   `chrome-extension://${getExtensionId(flags)}/side-panel/index.html`
+
+const getExtensionStoreUrl = (flags = {}) =>
+  `https://chromewebstore.google.com/detail/${getExtensionId(flags)}`
+
+const getExtensionReviewUrl = (flags = {}) =>
+  `https://chrome.google.com/webstore/detail/${getExtensionId(flags)}/reviews`
 
 const readConfig = () => {
   try {
@@ -1077,6 +1106,10 @@ const getCompleteCommand = (action, flags) => {
     return action.completeCommand
   }
 
+  if (action.verification === "extension_session") {
+    return `npx indiecorns extension open --app-url ${getAppUrl(flags)}`
+  }
+
   if (action.id === "discord") {
     return `npx indiecorns complete slack --app-url ${getAppUrl(flags)}`
   }
@@ -1096,6 +1129,7 @@ const getActionPlatform = (action) => {
     return "linkedin"
   }
   if (action.id === "discord") return "slack"
+  if (action.id === CHROME_EXTENSION_ACTION_ID) return "chrome_web_store"
   if (action.id?.includes("peerlist")) return "peerlist"
   if (action.id?.includes("producthunt")) return "producthunt"
   if (action.id === "external-profile-github") return "github"
@@ -1104,11 +1138,14 @@ const getActionPlatform = (action) => {
   return "indiecorns"
 }
 
-const isManualAction = (action) => action.id?.endsWith("-comment")
+const isManualAction = (action) =>
+  action.id?.endsWith("-comment") || action.id === CHROME_EXTENSION_ACTION_ID
 
 const getEvidenceRequired = (action) => {
   if (action.evidenceRequired) return action.evidenceRequired
   if (action.verification === "cli_session") return "completed CLI session"
+  if (action.verification === "extension_session")
+    return "signed-in Chrome extension session"
   if (action.verification === "profile_link")
     return "saved verified profile link"
   if (isManualAction(action)) {
@@ -1247,9 +1284,20 @@ const getAgentPlanFromApp = async (flags) => {
           status: item.status === "completed" ? "completed" : "pending",
           blocked: item.status === "blocked",
           requires: item.depends_on ?? [],
-          command: `npx indiecorns follow ${item.key}`,
-          agentCommand: `npx indiecorns follow ${item.key} --agent`,
-          verification: "server_verified",
+          command:
+            item.key === CHROME_EXTENSION_ACTION_ID
+              ? "npx indiecorns extension install"
+              : `npx indiecorns follow ${item.key}`,
+          agentCommand:
+            item.key === CHROME_EXTENSION_ACTION_ID
+              ? "npx indiecorns extension install --agent"
+              : `npx indiecorns follow ${item.key} --agent`,
+          verification:
+            item.verification ??
+            (item.key === CHROME_EXTENSION_ACTION_ID
+              ? "extension_session"
+              : "server_verified"),
+          reviewUrl: item.review_url ?? item.reviewUrl,
         })),
       }
     }
@@ -1457,16 +1505,14 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
       command: action.agentCommand ?? action.command,
       agentCommand: action.agentCommand ?? action.command,
       completeCommand:
-        action.completeCommand ??
-        (action.id
-          ? `npx indiecorns complete ${action.id} --app-url ${appUrl}`
-          : undefined),
+        action.completeCommand ?? getCompleteCommand(action, flags),
       agentCapability: getAgentCapability(action, authenticated),
       browserAssist: getBrowserAssist(action),
       verification: action.verification,
       evidenceRequired: getEvidenceRequired(action),
       safeToAutoComplete:
         getAgentCapability(action, authenticated) === "cli_direct",
+      reviewUrl: action.reviewUrl ?? action.reviewHref,
       required: action.required,
       requires: action.requires ?? [],
       targetProgress: action.targetProgress,
@@ -3208,12 +3254,14 @@ const toTaskOutput = (action, flags) => {
     id: mergedAction.id,
     kind: mergedAction.kind ?? "open_url",
     title: mergedAction.title,
+    description: mergedAction.description,
     credits: mergedAction.credits,
     status: mergedAction.status ?? "pending",
     url: normalizeActionUrl(mergedAction),
     command: getActionCommand(mergedAction, flags),
     completeCommand: getCompleteCommand(mergedAction, flags),
     verification: mergedAction.verification ?? "external_platform",
+    reviewUrl: mergedAction.reviewUrl ?? mergedAction.reviewHref,
     aliases: mergedAction.aliases,
     required: Boolean(mergedAction.required),
     requires: mergedAction.requires ?? [],
@@ -3290,7 +3338,7 @@ const runTasks = async (flags) => {
   printBrandHeader("found your next step.")
   section("Quick start")
   console.log(
-    `${completedQuickStart}/${quickStartTasks.length} complete · connect, add your website, join Slack`
+    `${completedQuickStart}/${quickStartTasks.length} complete · connect, add your website, join Slack, try the extension`
   )
 
   if (pendingQuickStart.length > 0) {
@@ -3560,7 +3608,11 @@ const runAllOnboarding = async (flags) => {
 const runComplete = async (flags, target) => {
   const selectedActions =
     target === "all"
-      ? ONBOARDING_ACTIONS.filter((action) => !isProfileAction(action))
+      ? ONBOARDING_ACTIONS.filter(
+          (action) =>
+            !isProfileAction(action) &&
+            action.verification !== "extension_session"
+        )
       : [findAction(target)].filter(Boolean)
 
   if (selectedActions.length === 0) {
@@ -3577,6 +3629,17 @@ const runComplete = async (flags, target) => {
     console.error(
       `Run: ${getActionCommand(action, flags).replace(/^npx /, "")}`
     )
+    return 1
+  }
+
+  if (
+    selectedActions.some(
+      (action) => action.verification === "extension_session"
+    )
+  ) {
+    console.error(fail("The Chrome extension must verify this task itself."))
+    console.error("Run: indiecorns extension install")
+    console.error("Then open the extension and sign in once.")
     return 1
   }
 
@@ -5943,6 +6006,52 @@ const runExtensionOpen = async (flags) => {
   return 0
 }
 
+const runExtensionStore = (flags, destination) => {
+  const review = destination === "review"
+  const url = review
+    ? getExtensionReviewUrl(flags)
+    : getExtensionStoreUrl(flags)
+  const output = {
+    kind: "open_url",
+    action: review ? "review_extension" : "install_extension",
+    extensionId: getExtensionId(flags),
+    url,
+    optional: review,
+    note: review
+      ? "Reviews are optional and should reflect the user's honest experience."
+      : "Open the installed extension and sign in once to verify installation.",
+  }
+
+  if (flags.json || flags.agent) {
+    printJson(output)
+    return 0
+  }
+
+  printBrandHeader(
+    review
+      ? "is opening the optional review page."
+      : "is opening the Chrome extension listing."
+  )
+  section("Chrome extension")
+  console.log(dim(url))
+
+  if (flags.open === false || flags["no-open"]) {
+    console.log(`Open this URL: ${url}`)
+    return 0
+  }
+
+  if (openUrl(url)) {
+    console.log(
+      ok(review ? "Opened the review page." : "Opened the Chrome Web Store.")
+    )
+    return 0
+  }
+
+  console.log(warn("I could not open a browser automatically."))
+  console.log(`Open this URL: ${url}`)
+  return 0
+}
+
 const readJsonFile = (path, fallback) => {
   try {
     return JSON.parse(readFileSync(path, "utf8"))
@@ -6664,8 +6773,14 @@ const main = async () => {
           "run-next": flags["run-next"] || subcommand !== "open",
         })
       }
+      if (subcommand === "install" || subcommand === "add") {
+        return runExtensionStore(flags, "install")
+      }
+      if (subcommand === "review") {
+        return runExtensionStore(flags, "review")
+      }
       console.error(fail(`Unknown extension command: ${subcommand}`))
-      console.error("Try: indiecorns extension open")
+      console.error("Try: indiecorns extension install")
       return 1
     }
     case "plugin": {

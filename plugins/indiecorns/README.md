@@ -66,6 +66,10 @@ For member-follow workflows, use `npx indiecorns follow-members all --agent`.
 It returns Peerlist, X, and Product Hunt profile targets plus per-target record
 commands for after the external follow is actually completed.
 
+Use `npx indiecorns extension install` for the zero-credit Chrome extension
+setup action. Installation is verified by a signed-in extension session;
+`npx indiecorns extension review` is always optional and never incentivized.
+
 ## CLI Release Path
 
 Completed Indiecorns CLI or bundled-plugin changes should be published, not

@@ -27,6 +27,8 @@ npm run cli -- upvote-members peerlist --agent
 npm run cli -- rate peerlist --agent
 npm run cli -- peerlist-launches --agent
 npm run cli -- indiehackers fill-profile --agent
+npm run cli -- extension install --no-open
+npm run cli -- extension review --no-open
 npm run cli -- join peerlist --no-open
 npm run cli -- profiles --platform peerlist --json
 npm run cli -- complete all
@@ -49,6 +51,8 @@ npx indiecorns upvote-members peerlist --agent
 npx indiecorns rate peerlist --agent
 npx indiecorns peerlist-launches --agent
 npx indiecorns indiehackers fill-profile --agent
+npx indiecorns extension install --no-open
+npx indiecorns extension review --no-open
 npx indiecorns join peerlist --no-open
 npx indiecorns profiles --platform peerlist --json
 npx indiecorns complete all
@@ -92,6 +96,10 @@ platform provides a token.
 - Never submit credentials, email addresses, or OAuth forms unless the user
   explicitly asks and the boundary is safe.
 - Use `--no-open`, `--json`, or `--agent` when running inside automation.
+- Use `npx indiecorns extension install` to open the Chrome Web Store listing.
+  The installed extension verifies this zero-credit onboarding action when the
+  user signs in. `npx indiecorns extension review` is optional and must never be
+  tied to credits or described as requiring a positive rating.
 - Do not scrape the Indiecorns dashboard when `npx indiecorns agent` provides
   the same action plan.
 - Prefer `npx indiecorns run --agent` to execute every pending Indiecorns

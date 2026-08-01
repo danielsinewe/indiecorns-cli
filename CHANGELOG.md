@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.38 - 2026-08-01
+
+- Add the Chrome extension as the fourth quick-start action across human and
+  agent output, with installation verified by a signed-in extension session.
+- Add `extension install` and optional `extension review` commands without
+  credits or rating incentives.
+
 ## 0.3.37 - 2026-07-31
 
 - Ignore stale server readiness commands that point back to an already
