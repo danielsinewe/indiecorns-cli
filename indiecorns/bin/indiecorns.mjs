@@ -26,7 +26,7 @@ const QUICK_START_ACTION_IDS = [
   "discord",
   CHROME_EXTENSION_ACTION_ID,
 ]
-const DEFAULT_EXTENSION_ID = "adohicablinejcgkglhedohifnieilbg"
+const DEFAULT_EXTENSION_ID = "oldjmlmncilgeagpfgkcjjlkbfbkiggk"
 const enabledValues = new Set(["1", "true", "yes", "on"])
 const ONBOARDING_ACTIONS = [
   {

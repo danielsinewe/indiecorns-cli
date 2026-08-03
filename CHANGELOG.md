@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.39 - 2026-08-03
+
+- Point Chrome extension install, review, and side-panel commands at the
+  published Indiecorns Web Store item.
+
 ## 0.3.38 - 2026-08-01
 
 - Add the Chrome extension as the fourth quick-start action across human and

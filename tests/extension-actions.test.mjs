@@ -39,8 +39,8 @@ test("extension store commands are agent-safe and review is optional", async () 
     assert.deepEqual(JSON.parse(install.stdout), {
       kind: "open_url",
       action: "install_extension",
-      extensionId: "adohicablinejcgkglhedohifnieilbg",
-      url: "https://chromewebstore.google.com/detail/adohicablinejcgkglhedohifnieilbg",
+      extensionId: "oldjmlmncilgeagpfgkcjjlkbfbkiggk",
+      url: "https://chromewebstore.google.com/detail/oldjmlmncilgeagpfgkcjjlkbfbkiggk",
       optional: false,
       note: "Open the installed extension and sign in once to verify installation.",
     })
@@ -54,7 +54,7 @@ test("extension store commands are agent-safe and review is optional", async () 
     assert.equal(reviewOutput.optional, true)
     assert.equal(
       reviewOutput.url,
-      "https://chrome.google.com/webstore/detail/adohicablinejcgkglhedohifnieilbg/reviews"
+      "https://chrome.google.com/webstore/detail/oldjmlmncilgeagpfgkcjjlkbfbkiggk/reviews"
     )
     assert.match(reviewOutput.note, /honest experience/)
 
