@@ -140,6 +140,7 @@ Commands:
   extension install              Open the Chrome Web Store listing
   extension review               Open the optional Chrome Web Store review page
   agent                          Print a Codex-ready JSON action plan
+  codex                          Print the concise next-step handoff used by Codex
   plugin install                 Install the Indiecorns Codex plugin locally
   telemetry status               Show CLI telemetry status
   telemetry disable              Disable CLI telemetry
@@ -290,8 +291,6 @@ const determineAppRoot = () => {
 }
 
 const appRoot = determineAppRoot()
-const readPackage = () =>
-  JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8"))
 const configDir = join(homedir(), ".indiecorns")
 const configPath = join(configDir, "config.json")
 const bundledPluginRoot = resolve(
@@ -1154,6 +1153,35 @@ const getEvidenceRequired = (action) => {
   return "observed before/after platform state from browser assist"
 }
 
+const getRequiredInput = (action) => {
+  if (action?.requiredInput) return action.requiredInput
+  if (action?.id === "external-profile-website") {
+    return {
+      name: "profileUrl",
+      label: "Public website URL",
+      type: "url",
+      placeholder: "https://your-site.com",
+    }
+  }
+  if (action?.id === "external-profile-linkedin") {
+    return {
+      name: "profileUrl",
+      label: "LinkedIn profile URL",
+      type: "url",
+      placeholder: "https://www.linkedin.com/in/your-name",
+    }
+  }
+  if (action?.verification === "profile_link") {
+    return {
+      name: "username",
+      label: `${getActionPlatform(action)} username`,
+      type: "text",
+      placeholder: "your-username",
+    }
+  }
+  return null
+}
+
 const getBrowserAssist = (action) => {
   if (action.browserAssist) return action.browserAssist
   const targetUrl = action.targetUrl ?? action.url
@@ -1510,6 +1538,7 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
       browserAssist: getBrowserAssist(action),
       verification: action.verification,
       evidenceRequired: getEvidenceRequired(action),
+      requiredInput: getRequiredInput(action),
       safeToAutoComplete:
         getAgentCapability(action, authenticated) === "cli_direct",
       reviewUrl: action.reviewUrl ?? action.reviewHref,
@@ -6223,20 +6252,19 @@ const runPluginInstall = (flags) => {
 }
 
 const getSetupReport = () => {
-  const pkg = readPackage()
   const npmVersion = spawnSync("npm", ["--version"], { encoding: "utf8" })
-  const nodeMajor = Number.parseInt(
-    process.versions.node.split(".")[0] ?? "0",
-    10
-  )
+  const [nodeMajor = 0, nodeMinor = 0] = process.versions.node
+    .split(".")
+    .map((value) => Number.parseInt(value, 10))
+  const nodeSupported =
+    (nodeMajor === 20 && nodeMinor >= 20) ||
+    (nodeMajor === 22 && nodeMinor >= 22) ||
+    nodeMajor > 22
   const rows = [
     {
-      status: nodeMajor >= 20 ? "ok" : "warn",
+      status: nodeSupported ? "ok" : "warn",
       label: `Node ${process.versions.node}`,
-      detail:
-        nodeMajor >= 20
-          ? "compatible with Next.js 16"
-          : "Node 20+ is recommended",
+      detail: nodeSupported ? "supported" : "update Node to a supported release",
     },
     {
       status: npmVersion.status === 0 ? "ok" : "fail",
@@ -6246,24 +6274,9 @@ const getSetupReport = () => {
           ? npmVersion.stdout.trim()
           : "npm command failed",
     },
-    {
-      status: existsSync(join(appRoot, "node_modules")) ? "ok" : "warn",
-      label: "dependencies installed",
-      detail: "expected at indiecorns/node_modules",
-    },
-    {
-      status: existsSync(join(appRoot, "app", "layout.tsx")) ? "ok" : "fail",
-      label: "Next app layout exists",
-      detail: "app/layout.tsx",
-    },
-    {
-      status: pkg.scripts?.dev ? "ok" : "fail",
-      label: "dev script configured",
-      detail: pkg.scripts?.dev ?? "missing",
-    },
   ]
 
-  return { appRoot, packageName: pkg.name, rows }
+  return { runtime: "npx", rows }
 }
 
 const getWizardReport = async (flags) => {
@@ -6461,6 +6474,91 @@ const runWizard = async (flags) => {
 }
 
 const runOnboarding = async (flags) => runWizard(flags)
+
+const isCodexHost = () =>
+  Boolean(
+    process.env.CODEX_CI ||
+      process.env.CODEX_SESSION_ID ||
+      process.env.CODEX_THREAD_ID ||
+      process.env.CODEX_SHELL
+  )
+
+const runCodexHandoff = async (flags) => {
+  const report = await getWizardReport({
+    ...flags,
+    agent: true,
+    "no-open": true,
+  })
+  const quickStartActions = QUICK_START_ACTION_IDS.map((actionId) =>
+    report.agentPlan.actions.find((action) => action.id === actionId)
+  ).filter(Boolean)
+  const completed = quickStartActions.filter(
+    (action) => action.status === "completed"
+  ).length
+  const total = quickStartActions.length
+  const pluginReady =
+    report.plugin.installed && report.plugin.skillsInstalled
+  const ready = total > 0 && completed === total && pluginReady
+  const nextQuickStartAction = quickStartActions.find(
+    (action) => action.status !== "completed"
+  )
+  const nextAction = !report.authenticated
+    ? {
+        id: "login",
+        title: "Connect Indiecorns",
+        command: report.commands.login,
+        url: `${report.appUrl}/auth?source=cli`,
+        evidenceRequired: "completed CLI session",
+        requiredInput: null,
+      }
+    : !pluginReady
+      ? {
+          id: "plugin-install",
+          title: "Install the Indiecorns plugin",
+          command: report.commands.pluginInstall,
+          url: report.appUrl,
+          evidenceRequired: "installed plugin and skill directories",
+          requiredInput: null,
+        }
+      : nextQuickStartAction
+        ? {
+            id: nextQuickStartAction.id,
+            title: nextQuickStartAction.title,
+            command:
+              nextQuickStartAction.agentCommand ?? nextQuickStartAction.command,
+            url: nextQuickStartAction.targetUrl ?? nextQuickStartAction.url,
+            evidenceRequired: getEvidenceRequired(nextQuickStartAction),
+            requiredInput: getRequiredInput(nextQuickStartAction),
+          }
+        : null
+  const requiredInput = nextAction?.requiredInput
+
+  printJson({
+    v: 1,
+    app: "indiecorns",
+    mode: "codex_handoff",
+    ok: true,
+    version: getCliVersion(),
+    connection: {
+      authenticated: report.authenticated,
+      account: report.userEmail ?? null,
+      pluginInstalled: pluginReady,
+    },
+    quickStart: {
+      completed,
+      total,
+      percent: total ? Math.round((completed / total) * 100) : 0,
+    },
+    state: ready ? "ready" : "action_required",
+    nextAction,
+    instruction: ready
+      ? "Core setup is verified. Ask what the user wants to do in the Herd."
+      : requiredInput
+        ? `Ask the user for ${requiredInput.label}, substitute the real value, run the command, and verify ${nextAction.evidenceRequired}.`
+        : `Run the next command and verify ${nextAction?.evidenceRequired ?? "the completed state"}.`,
+  })
+  return 0
+}
 
 const main = async () => {
   const { command, args, flags: parsedFlags } = parseArgs(process.argv.slice(2))
@@ -6800,6 +6898,8 @@ const main = async () => {
     case "actions":
       printJson(await getAgentPlan(flags))
       return 0
+    case "codex":
+      return runCodexHandoff(flags)
     case "start":
       return runOnboarding(flags)
     case "help":
@@ -6808,7 +6908,7 @@ const main = async () => {
       console.log(usage)
       return 0
     case undefined:
-      return runOnboarding(flags)
+      return isCodexHost() ? runCodexHandoff(flags) : runOnboarding(flags)
     default:
       if (process.argv.slice(2).length === 0) {
         return runOnboarding(flags)

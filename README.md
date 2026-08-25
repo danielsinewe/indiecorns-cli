@@ -13,8 +13,10 @@ Run the CLI directly with npm:
 npx --yes indiecorns@latest
 ```
 
-The default command opens secure browser sign-in when needed, waits for the
-handoff, installs the agent plugin, and continues to the next setup action.
+In a terminal, the default command opens secure browser sign-in when needed,
+installs the agent plugin, and continues to the next setup action. In Codex, the
+same command automatically returns a concise structured handoff with exactly one
+next action, any required user input, and the proof needed to count it complete.
 There is no separate login command during first-run setup.
 
 Or install it globally:
@@ -56,12 +58,13 @@ Use the structured JSON interfaces when another agent is orchestrating the CLI:
 
 ```bash
 npx indiecorns agent
+npx indiecorns codex
 npx indiecorns wizard --ndjson --no-open
 npx indiecorns tasks --agent
 npx indiecorns run --agent
 ```
 
-`agent` and `--agent` are stable machine-readable surfaces. They avoid browser
+`codex`, `agent`, and `--agent` are stable machine-readable surfaces. They avoid browser
 opens and return the auth, dashboard, action, and next-command data an agent
 needs without parsing human terminal output.
 

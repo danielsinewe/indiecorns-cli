@@ -58,7 +58,12 @@ npx indiecorns profiles --platform peerlist --json
 npx indiecorns complete all
 ```
 
-`agent` and `--agent` are the stable machine-readable interfaces. Prefer them
+When Codex runs `npx --yes indiecorns@latest` with no arguments, the CLI detects
+the host and returns a small `codex_handoff` object. Follow its `instruction` and
+`nextAction`: ask for `requiredInput` when present, replace placeholders with the
+real value, and require `evidenceRequired` before reporting completion.
+
+`codex`, `agent`, and `--agent` are the stable machine-readable interfaces. Prefer them
 over parsing human CLI output.
 
 Use `wizard --ndjson --no-open` when an orchestrator wants setup progress as

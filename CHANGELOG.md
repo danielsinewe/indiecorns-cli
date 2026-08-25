@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.40 - 2026-08-25
+
+- Detect Codex for the no-argument command and return one concise structured
+  handoff with setup progress, the next action, required input, and proof.
+- Stop treating the caller's local `indiecorns/` source tree as a CLI runtime
+  dependency, removing irrelevant `node_modules`, layout, and dev-script warnings.
+- Preserve explicit `wizard`, `agent`, JSON, and NDJSON interfaces.
+
 ## 0.3.39 - 2026-08-03
 
 - Point Chrome extension install, review, and side-panel commands at the
