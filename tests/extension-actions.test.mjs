@@ -9,7 +9,7 @@ const cli = resolve("indiecorns/bin/indiecorns.mjs")
 
 const runCli = ({ args, home }) =>
   new Promise((resolveRun, reject) => {
-    const env = { ...process.env, HOME: home, NO_COLOR: "1" }
+    const env = { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: "1" }
     delete env.INDIECORNS_TOKEN
     const child = spawn(process.execPath, [cli, ...args], {
       env,

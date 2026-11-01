@@ -17,6 +17,7 @@ test("no-argument Codex runs return one concise next-step handoff", () => {
         ...process.env,
         CODEX_CI: "1",
         HOME: testHome,
+        USERPROFILE: testHome,
         INDIECORNS_APP_URL: "http://127.0.0.1:1",
         INDIECORNS_TELEMETRY_DISABLED: "1",
       },

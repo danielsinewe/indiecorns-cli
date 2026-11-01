@@ -48,7 +48,7 @@ export function enqueue(state, targets, now) {
   }
 }
 export async function runWorker({ directory, discover, once = false, intervalMs = 300000,
-  signal, now = Date.now, onCycle = () => {}, authRevision, discoveryRevision, observe, deriveTargets, observationLimit = 5 }) {
+  signal, now = Date.now, onCycle = () => {}, authRevision, discoveryRevision, observe, deriveTargets, act, prioritize, observationLimit = 5 }) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw new Error('Interval must be at least 1000ms')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const lock = join(directory, 'worker.lock')
@@ -96,6 +96,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         state.lastPollAt = now()
         state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
+      if (prioritize) await prioritize(state, signal)
       state.pending = Object.values(state.jobs).filter(job => job.status === 'queued')
         .sort((a, b) => a.priority - b.priority || a.discoveredAt - b.discoveredAt).map(job => job.key)
       // Save discovery and scheduling before any outbound page request.
@@ -123,6 +124,10 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
       state.pending = Object.values(state.jobs).filter(job => job.status === 'queued')
         .sort((a, b) => a.priority - b.priority || a.discoveredAt - b.discoveredAt).map(job => job.key)
       saveState(path, state)
+      if (act && state.lastError !== 'auth_required' && !signal?.aborted) {
+        await act(state, signal, () => saveState(path, state))
+        saveState(path, state)
+      }
       onCycle({ pending: state.pending.length, lastError: state.lastError, nextPollAt: state.nextPollAt })
       if (once) return state
       const dueObservations = observe && state.lastError !== 'auth_required'

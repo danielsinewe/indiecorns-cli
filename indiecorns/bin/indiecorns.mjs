@@ -14,10 +14,13 @@ import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { spawnSync } from "node:child_process"
 
+import { credential, storeCredential } from "../lib/credentials.mjs"
+import { validateSlackEvidence, slackSeedTargets, prioritizeSlack, refreshSlackEvidence } from "../lib/slack.mjs"
+import { defaultPolicy, validatePolicy, runActions } from "../lib/actions.mjs"
 import { discoverCommunity } from "../lib/discovery.mjs"
 import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
 import { manageService } from "../lib/service.mjs"
-import { runWorker, workerStatus } from "../lib/worker.mjs"
+import { runWorker, workerStatus, enqueue, saveState } from "../lib/worker.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -2002,7 +2005,7 @@ const resolveProfileInput = async ({
   profileUrl,
 }) => {
   const candidate = profileUrl ?? (urlLike(username) ? username : null)
-  let resolvedProfileUrl = candidate ? withProtocol(candidate) : profileUrl
+  let resolvedProfileUrl = candidate ? (safeUrl(withProtocol(candidate))?.href ?? withProtocol(candidate)) : profileUrl
   let resolvedUsername = username && !urlLike(username) ? username : null
   const resolution = {
     input: candidate ?? username ?? null,
@@ -2012,7 +2015,7 @@ const resolveProfileInput = async ({
   }
 
   if (candidate) {
-    const redirectUrl = await resolveRedirectUrl(candidate)
+    const redirectUrl = flags.resolve === false ? null : await resolveRedirectUrl(candidate)
     if (redirectUrl) {
       resolvedProfileUrl = redirectUrl
       resolution.method = "http_redirect"
@@ -6574,6 +6577,62 @@ const main = async () => {
   switch (command) {
     case "worker": {
       const directory = join(configDir, "worker")
+      const slackPath = join(directory, "slack-evidence.json")
+      const updateSlack = async (state, signal) => {
+        let snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath, "utf8"))) : null
+        const token = credential(directory, "slack")
+        if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
+          try {
+            snapshot = await refreshSlackEvidence({snapshot,token,signal})
+            saveState(slackPath, snapshot)
+            state.slackNextRefreshAt = Date.now() + 3600000
+            state.slackSyncError = null
+          } catch (error) {
+            state.slackNextRefreshAt = Date.now() + (error.retryAfterMs ?? 3600000)
+            state.slackSyncError = "membership_refresh_failed"
+          }
+        }
+        enqueue(state, slackSeedTargets(snapshot), Date.now())
+        prioritizeSlack(state, snapshot)
+      }
+      const accountRevision = () => createHash("sha256").update(JSON.stringify({
+        appUrl: getAppUrl(flags),
+        account: process.env.INDIECORNS_TOKEN ? createHash("sha256").update(process.env.INDIECORNS_TOKEN).digest("hex") : readConfig().browserSession?.userId ?? readConfig().browserSession?.userEmail ?? "unauthenticated",
+      })).digest("hex")
+      const policyPath = join(directory, "policy.json")
+      const readPolicy = () => existsSync(policyPath) ? validatePolicy(JSON.parse(readFileSync(policyPath, "utf8"))) : defaultPolicy
+      if (args[0] === "credentials") {
+        const provider = flags.provider
+        if (flags.remove) printJson(storeCredential(directory, provider, null))
+        else if (flags["token-stdin"]) {
+          if (process.stdin.isTTY) throw new Error("Pipe the credential on stdin; interactive entry is disabled")
+          let token = ""
+          for await (const chunk of process.stdin) {
+            token += chunk.toString("utf8")
+            if (token.length > 16384) throw new Error("Credential exceeds size limit")
+          }
+          printJson(storeCredential(directory, provider, token.trim()))
+        } else printJson({provider,configured:Boolean(credential(directory, provider))})
+        return 0
+      }
+      if (args[0] === "policy") {
+        if (flags.mode) {
+          const policy = validatePolicy({...readPolicy(), mode: flags.mode,
+            ...(flags.mode === "execute" ? {accountRevision:accountRevision()} : {}),
+            ...(flags["github-repository"] ? {githubRepositories:String(flags["github-repository"]).split(",")} : {}),
+            ...(flags["max-external-per-day"] ? {maxExternalPerDay:Number(flags["max-external-per-day"])} : {}),
+          })
+          mkdirSync(directory, {recursive:true,mode:0o700})
+          writeFileSync(policyPath, JSON.stringify(policy,null,2), {mode:0o600})
+        }
+        printJson(readPolicy())
+        return 0
+      }
+      if (args[0] === "briefs") {
+        const state = workerStatus(directory).state
+        printJson(Object.values(state?.actions ?? {}).filter(action => action.kind === "support_brief"))
+        return 0
+      }
       if (["install", "uninstall", "service-status"].includes(args[0])) {
         printJson(manageService(args[0], {
           cli: fileURLToPath(import.meta.url),
@@ -6604,7 +6663,9 @@ const main = async () => {
             headers: getCliAuthHeaders(), signal,
           }),
           observe: (target, hosts, signal, checkpoint) => scrapeTarget({ target, hosts, signal, checkpoint }),
+          prioritize: updateSlack,
           deriveTargets: memberCandidates,
+          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), signal, checkpoint, token:credential(directory, "github"), accountRevision:accountRevision()}),
           onCycle: printJson,
         })
         return state.lastError ? 1 : 0

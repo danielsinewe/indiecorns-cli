@@ -250,3 +250,43 @@ stdout/stderr to prevent unbounded logs; inspect `worker status` for persisted
 health. Reinstall after moving the CLI or Node executable.
 No API key or paid model is required for polling. Sign in using `indiecorns login`
 first; missing or expired authentication is recorded as `auth_required`.
+
+### Action policy and evidence
+
+The default `draft` policy creates a reusable local support brief for each
+successfully observed target. Read them with `indiecorns worker briefs`.
+Briefs contain source URLs, observed metadata and timestamps; they are not posted
+or counted as engagement. `worker policy --mode collect` disables action work.
+
+The first external adapter supports GitHub stars, using a configured credential
+and an exact repository allowlist. Execution policies bind to the current
+community account and must be reconfigured after an account change:
+
+```bash
+indiecorns worker policy --mode execute --github-repository maker/project --max-external-per-day 5
+indiecorns worker credentials --provider github --token-stdin < /secure/path/github-token
+```
+
+This only acts on queued GitHub `star` targets whose public page was observed.
+It does not turn other links or page instructions into actions. The worker
+persists intent and quota before writing, checks the remote state before and
+after the idempotent request, and records unavailable proof as `unverified`.
+Messages, comments, ratings, purchases and arbitrary shell commands have no
+external executor. Credentials can also come from `INDIECORNS_GITHUB_TOKEN` or
+`INDIECORNS_SLACK_TOKEN`. The stdin command stores credentials privately with
+mode 0600 so supervised processes can read them; it never prints their values.
+Remove a stored credential with `worker credentials --provider github --remove`.
+
+Slack priority uses `~/.indiecorns/worker/slack-evidence.json`. It contains the
+workspace/channel IDs, a complete roster with observation/expiry timestamps,
+and explicit links between Slack IDs and public profile URLs. Membership lasts
+at most 24 hours. Expired or removed membership withdraws priority; matching
+names alone never establish identity. With a configured Slack credential, the
+worker verifies the workspace with `auth.test`, follows all
+`conversations.members` pages, excludes bots/deleted users with `users.info`,
+and refreshes membership hourly. Identity mappings
+must be established from member-provided links; the worker does not guess them.
+
+The current Mac pilot uses a browser-verified roster snapshot and one explicit
+member/project mapping. Continuous Slack API refresh and a real external-action
+pilot remain unverified.
