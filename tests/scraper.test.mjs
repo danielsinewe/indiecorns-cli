@@ -71,3 +71,20 @@ test('compressed text respects the decoded body limit and unreadable robots fail
   await assert.rejects(scrapeTarget({target:{profileUrl:'https://example.com/project'},hosts:{},now:()=>1000,
     request:async()=>({status:200,text:'',bodyRejected:true,headers:{'content-type':'application/octet-stream'}})}),/Robots content unavailable/)
 })
+
+test('published repository cards on a member profile become exact code project candidates',()=>{
+  const observation=extractPage('<a href="https://github.com/maker/project?ref=peerlist">maker/project Code project</a><a href="https://github.com/vendor/other">GitHub footer</a>','https://peerlist.io/member')
+  assert.deepEqual(observation.codeLinks,['https://github.com/maker/project'])
+  const candidates=memberCandidates({platform:'peerlist',username:'member',profileUrl:'https://peerlist.io/member'},observation)
+  assert.equal(candidates.length,1)
+  assert.equal(candidates[0].platform,'github')
+  assert.equal(candidates[0].attribution,'published_profile_repository')
+})
+
+test('GitHub profile repository links are discovered without crawling fork or star listings',()=>{
+  const candidates=memberCandidates({platform:'github',username:'maker',profileUrl:'https://github.com/maker'},
+    {links:['https://github.com/maker/project','https://github.com/maker/project/stargazers','https://github.com/other/repository']})
+  assert.equal(candidates.length,1)
+  assert.equal(candidates[0].profileUrl,'https://github.com/maker/project')
+  assert.equal(candidates[0].targetType,'project')
+})

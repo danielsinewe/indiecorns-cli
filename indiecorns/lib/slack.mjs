@@ -35,8 +35,14 @@ export function slackMembership(snapshot, target, now=Date.now()) {
 export function slackSeedTargets(snapshot, now=Date.now()) {
   if (!snapshot || snapshot.observedAt>now || snapshot.expiresAt<=now) return []
   const members=new Set(snapshot.memberIds)
-  return snapshot.identities.filter(identity=>members.has(identity.slackUserId)).flatMap(identity=>identity.targets)
-    .filter(target=>slackMembership(snapshot,target,now)).map(target=>({...target,slackMember:true,source:'slack_member_shared'}))
+  const profile=(address)=>{
+    const url=new URL(address), host=url.hostname.replace(/^www\./,'')
+    const platform=({'peerlist.io':'peerlist','github.com':'github','x.com':'x','twitter.com':'x','linkedin.com':'linkedin','producthunt.com':'producthunt'})[host] ?? 'website'
+    const parts=url.pathname.split('/').filter(Boolean)
+    return {platform,eventType:'inspect',targetType:'profile',profileUrl:address,username:platform==='linkedin'?parts[1]:parts[0],source:'slack_member_profile'}
+  }
+  return snapshot.identities.filter(identity=>members.has(identity.slackUserId)).flatMap(identity=>[...identity.targets,...identity.profileUrls.map(profile)])
+    .filter(target=>slackMembership(snapshot,target,now)).map(target=>({...target,slackMember:true,source:target.source ?? 'slack_member_shared'}))
 }
 export function prioritizeSlack(state, snapshot, now=Date.now()) {
   for (const job of Object.values(state.jobs)) {

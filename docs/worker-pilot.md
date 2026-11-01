@@ -18,7 +18,7 @@ deduplication, independent observation scheduling, and service configuration.
 
 Remaining goal requirements:
 - Extend exact public-profile mappings beyond the first verified member.
-- Validate real external actions and add the remaining platform executors.
+- Add the remaining platform executors; a real GitHub action is now verified.
 - Keep startup/recovery verification passing on all three supported operating systems.
 - Handle discovery pagination/capacity and long-term retention at larger scale.
 - Publish the reviewed CLI release and verify installation outside this checkout.
@@ -61,3 +61,18 @@ platform types. The worker now has 14 deduplicated targets and has produced eigh
 local briefs at the latest inspection. Shared-link priority does not assert that
 the sharing member owns the linked external project. Message bodies are not
 persisted. External engagement has still not been executed in the pilot.
+
+The member's publicly published GitHub profile was explicitly linked from the
+already mapped public community profile. The worker seeded that known profile,
+read its public repository links, and automatically discovered six repositories.
+One exact repository was allowlisted with an execution policy bound to the current
+community account and a one-action daily cap. The worker observed the repository,
+checked that it was not already starred, performed the star, and verified it.
+An independent authenticated GitHub read changed from 404 before execution to 204
+after execution. The receipt records `alreadyPresent: false`. After restart the
+receipt timestamp and daily attempt count remained unchanged at one.
+
+At this inspection the live pilot has 41 targets and 35 local briefs. The code
+has 48 passing local tests. Windows startup/recovery/cleanup passed in CI run
+41321015554 at commit 46c37f8. Remaining release and scale work is still open;
+this is not a claim that every platform can execute engagement actions.

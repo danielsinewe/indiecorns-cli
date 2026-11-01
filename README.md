@@ -270,7 +270,8 @@ indiecorns worker policy --mode execute --github-repository maker/project --max-
 indiecorns worker credentials --provider github --token-stdin < /secure/path/github-token
 ```
 
-This only acts on queued GitHub `star` targets whose public page was observed.
+This only acts on allowlisted GitHub repository targets whose public page was
+observed. Repository links on known member profiles are discovered automatically.
 It does not turn other links or page instructions into actions. The worker
 persists intent and quota before writing, checks the remote state before and
 after the idempotent request, and records unavailable proof as `unverified`.
@@ -309,4 +310,6 @@ community targets. A shared link does not establish external project ownership.
 API rate limits and pending pages retain their deadlines across restarts.
 
 The current Mac pilot has verified live API roster refresh and automatic
-channel-link discovery. A real external-action pilot is still outstanding.
+channel-link discovery. The Mac pilot has completed one independently verified GitHub star through an
+exact one-repository allowlist and a one-action daily cap. The persisted receipt
+survived restart without replay; broader platform executors remain pending.

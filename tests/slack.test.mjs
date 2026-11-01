@@ -11,7 +11,7 @@ test('priority requires fresh membership and exact profile boundaries; names are
   assert.equal(slackMembership(s,{profileUrl:'https://other.example/maker/project/app'},5000),null)
   assert.equal(slackMembership(s,{profileUrl:'https://peerlist.io/maker'},100001),null)
   assert.equal(slackMembership({...s,memberIds:[]},{profileUrl:'https://peerlist.io/maker'},5000),null)
-  assert.equal(slackSeedTargets(s,5000).length,1)
+  assert.equal(slackSeedTargets(s,5000).length,2)
 })
 
 test('expired or removed channel membership withdraws priority without deleting queued work',()=>{

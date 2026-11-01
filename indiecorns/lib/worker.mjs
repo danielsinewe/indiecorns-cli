@@ -49,7 +49,7 @@ export function enqueue(state, targets, now) {
   }
 }
 export async function runWorker({ directory, discover, once = false, intervalMs = 300000,
-  signal, now = Date.now, onCycle = () => {}, authRevision, discoveryRevision, observe, deriveTargets, act, prioritize, observationLimit = 5 }) {
+  signal, now = Date.now, onCycle = () => {}, authRevision, discoveryRevision, observe, deriveTargets, derivationRevision = 1, act, prioritize, observationLimit = 5 }) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw new Error('Interval must be at least 1000ms')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const lock = join(directory, 'worker.lock')
@@ -122,7 +122,6 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
           if (signal?.aborted) break
           try {
             job.observation = await observe(job.target, state.hosts, signal, () => saveState(path, state))
-            if (deriveTargets && job.observation.status === 'observed') enqueue(state, deriveTargets(job.target, job.observation), now())
             job.observationFailures = 0
             job.nextObserveAt = now() + 21600000
             job.observationError = null
@@ -133,6 +132,19 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
             job.observationError = error.code === 'HOST_DELAY' ? 'host_cooldown' : 'observation_failed'
           }
           saveState(path, state)
+        }
+      }
+      if (deriveTargets) {
+        for (const job of Object.values(state.jobs)) {
+          if (job.observation?.status !== 'observed' ||
+            (job.observation.observedAt && now()-job.observation.observedAt>21600000) ||
+            (job.derivedFromHash === job.observation.contentHash && job.derivationRevision === derivationRevision)) continue
+          try {
+            enqueue(state, deriveTargets(job.target, job.observation), now())
+            job.derivedFromHash = job.observation.contentHash
+            job.derivationRevision = derivationRevision
+            job.derivationError = null
+          } catch { job.derivationError = 'candidate_processing_failed' }
         }
       }
       state.pending = Object.values(state.jobs).filter(job => job.status === 'queued')

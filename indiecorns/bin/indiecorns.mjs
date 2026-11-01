@@ -6704,6 +6704,7 @@ const main = async () => {
           observe: (target, hosts, signal, checkpoint) => scrapeTarget({ target, hosts, signal, checkpoint }),
           prioritize: updateSlack,
           deriveTargets: memberCandidates,
+          derivationRevision: "member-profile-repos-v2",
           act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), signal, checkpoint, token:credential(directory, "github"), accountRevision:accountRevision()}),
           onCycle: printJson,
         })
