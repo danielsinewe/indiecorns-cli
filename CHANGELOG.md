@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 - 2026-11-01
+
+- Accept npm 12.2's package-keyed JSON report in permanent-runtime installation
+  verification, while retaining compatibility with older npm versions.
+- Publish the continuous worker described below; the 0.4.0 publishing gate stopped
+  before uploading the package.
+
 ## 0.4.0 - 2026-11-01
 
 - Add supervised community workers for macOS, Linux and Windows, with durable
