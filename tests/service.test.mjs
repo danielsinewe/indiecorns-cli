@@ -29,6 +29,7 @@ test('service configuration rejects malformed paths and intervals', () => {
 test('Windows worker runs hidden at login, without a runtime limit, with recurring recovery', () => {
   const definition = serviceDefinition({ system: 'win32', home: "C:\\Users\\O'Neil", node: 'C:\\Program Files\\nodejs\\node.exe', cli: "C:\\Users\\O'Neil\\community worker\\cli.mjs", userId: 'S-1-5-21-123-456-789-1001' })
   assert.match(definition.taskName, /^IndiecornsWorker-S-1-5-/)
+  assert.match(definition.content, /encoding="UTF-16"/)
   assert.match(definition.content, /<LogonType>InteractiveToken<\/LogonType>/)
   assert.match(definition.content, /<RunLevel>LeastPrivilege<\/RunLevel>/)
   assert.match(definition.content, /<ExecutionTimeLimit>PT0S<\/ExecutionTimeLimit>/)

@@ -41,7 +41,7 @@ export function serviceDefinition({ system = platform(), home = homedir(), node 
       // Start-Process receives a literal executable and a prequoted argument string;
       // page content and credentials never enter the generated launcher.
       launcherContent: '\uFEFF' + `$ErrorActionPreference = 'Stop'\n$worker = Start-Process -FilePath ${psQuote(node)} -ArgumentList ${psQuote(args.slice(1).map(windowsQuote).join(' '))} -WindowStyle Hidden -Wait -PassThru\nexit $worker.ExitCode\n`,
-      content: `<?xml version="1.0" encoding="UTF-8"?>
+      content: `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
 <RegistrationInfo><Description>Indiecorns community worker</Description></RegistrationInfo>
 <Triggers>
@@ -73,7 +73,7 @@ export function manageService(action, options) {
   const domain = `gui/${process.getuid?.()}`
   if (action === 'install') {
     mkdirSync(dirname(definition.path), { recursive: true })
-    writeFileSync(definition.path, definition.content, { mode: 0o600 })
+    writeFileSync(definition.path, system === 'win32' ? Buffer.from('\uFEFF' + definition.content, 'utf16le') : definition.content, { mode: 0o600 })
     if (system === 'win32') {
       writeFileSync(definition.launcherPath, definition.launcherContent, {mode:0o600})
       run('schtasks.exe', ['/End', '/TN', definition.taskName], true)
