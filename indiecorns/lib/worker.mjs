@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync, renameSync, openSync, fsyncSync, closeSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { attachBacklog, restoreJob, restoreDueJobs, compactJobs, backlogSchedule, dueOrder } from './backlog.mjs'
+import { attachBacklog, restoreJob, restoreDueJobs, compactJobs, backlogSchedule, dueOrder, collectBacklogGarbage } from './backlog.mjs'
+import { retainWorkerState } from './retention.mjs'
 
 const read = (path, fallback) => {
   try { return JSON.parse(readFileSync(path, 'utf8')) }
@@ -41,9 +42,10 @@ export function enqueue(state, targets, now) {
       existing.target = {...existing.target,...target}
       existing.target.slackMember = target.slackMember
       existing.priority = target.slackMember ? 0 : 1
+      existing.lastDiscoveredAt = now
       continue
     }
-    state.jobs[key] = { key, target, status: 'queued', discoveredAt: now,
+    state.jobs[key] = { key, target, status: 'queued', discoveredAt: now,lastDiscoveredAt:now,
       priority: target.slackMember ? 0 : 1 }
   }
 }
@@ -156,9 +158,15 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         catch { state.actionHealth = 'action_configuration_failed' }
         saveState(path, state)
       }
+      const sweep=retainWorkerState(state,now())
       compactJobs(state)
       state.pending=state.pending.filter(key=>state.jobs[key])
       saveState(path,state)
+      if (sweep) {
+        try {state.retention.filesRemoved=collectBacklogGarbage(state);state.retention.health=null}
+        catch {state.retention.health='cleanup_deferred';state.retention.nextSweepAt=now()+3600000}
+        saveState(path,state)
+      }
       onCycle({ pending: state.pending.length + Object.keys(state.backlog).length, loaded:state.pending.length,
         backlog:Object.keys(state.backlog).length, lastError: state.lastError, nextPollAt: state.nextPollAt })
       if (once) return state

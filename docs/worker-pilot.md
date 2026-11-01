@@ -20,7 +20,7 @@ Remaining goal requirements:
 - Extend exact public-profile mappings beyond the first verified member.
 - Add the remaining platform executors; a real GitHub action is now verified.
 - Keep startup/recovery verification passing on all three supported operating systems.
-- Handle discovery pagination and long-term retention at larger scale.
+- Handle discovery pagination and validate larger-scale storage usage.
 - Publish the reviewed CLI release and verify installation outside this checkout.
 - Validate sustained unattended operation, beyond the short pilot so far.
 
@@ -73,7 +73,7 @@ after execution. The receipt records `alreadyPresent: false`. After restart the
 receipt timestamp and daily attempt count remained unchanged at one.
 
 At this inspection the live pilot has 41 targets and 35 local briefs. The code
-has 55 passing local tests. Windows startup/recovery/cleanup and permanent-runtime
+has 58 passing local tests. Windows startup/recovery/cleanup and permanent-runtime
 installation passed in three-OS CI run 41323577404 at commit a793de0. Remaining release and scale work is still open;
 this is not a claim that every platform can execute engagement actions.
 
@@ -94,11 +94,21 @@ cooldowns or losing targets. Each completed cycle leaves at most 2,000 loaded jo
 Cold payloads are atomically written before the state index is committed and retained
 after promotion, so the previously committed state can still recover after a crash.
 Missing payloads fail closed while preserving the committed index and action receipts.
-This bounds loaded job payloads, not total disk consumption: the compact index and
-durable evidence still grow; automatic age-based retention is not yet implemented.
+This bounds loaded job payloads, not total disk consumption: pending work and
+external-action receipts remain durable as the community grows.
 
 An authenticated read of the live community API confirmed its response currently
 contains only platform, eventType, targetSource and targets, without a cursor,
 total or hasMore field. Full 200-target pages are now classified capacity_limited
 and partial, rather than falsely claiming complete discovery. Their targets still
 enter the queue; reaching subsequent pages requires backend pagination support.
+
+A daily retention sweep now retires successfully observed targets not rediscovered
+for 30 days, old briefs belonging to retired targets and expired robots caches whose
+host delay has elapsed. It preserves unobserved work, unfinished external actions,
+external-action receipts and quota history. Payload collection runs only after the
+state checkpoint commits; failures are classified and retried after an hour. Tests
+simulate a crash before committing retirement, confirm that the previous checkpoint
+can still load its cold payload, and verify that rediscovering a retired target
+does not repeat its completed external action. Legacy cold entries acquire retention
+metadata when next promoted and compacted.

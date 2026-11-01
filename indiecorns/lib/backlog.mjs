@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 // The state index is committed alongside scheduling and action receipts. Cold
@@ -23,6 +23,7 @@ export function restoreJob(state, key) {
   delete state.backlog[key]
 }
 const schedule = job => ({key:job.key, priority:job.priority, discoveredAt:job.discoveredAt,
+  lastDiscoveredAt:job.lastDiscoveredAt ?? job.discoveredAt, observed:job.observation?.status==='observed',
   status:job.status, nextObserveAt:job.nextObserveAt ?? 0})
 export const dueOrder = (a,b) => a.priority-b.priority ||
   (a.nextObserveAt ?? 0)-(b.nextObserveAt ?? 0) || a.discoveredAt-b.discoveredAt || a.key.localeCompare(b.key)
@@ -49,3 +50,25 @@ export function compactJobs(state, limit=2000) {
 }
 export const backlogSchedule = state => Object.values(state.backlog ?? {})
   .filter(job=>job.status==='queued').map(job=>job.nextObserveAt ?? 0)
+
+// Call only after committing state: cold files no longer referenced by that
+// checkpoint include retired jobs, promoted copies and interrupted spill writes.
+export function collectBacklogGarbage(state) {
+  const store=stores.get(state)
+  if (!store) throw new Error('Backlog storage unavailable')
+  let buckets
+  try {buckets=readdirSync(store.directory,{withFileTypes:true})}
+  catch(error) {if(error.code==='ENOENT') return 0;throw error}
+  let removed=0
+  for (const bucket of buckets) {
+    if (!bucket.isDirectory() || !/^[a-f0-9]{2}$/.test(bucket.name)) continue
+    for (const file of readdirSync(join(store.directory,bucket.name),{withFileTypes:true})) {
+      if (!file.isFile() || !/^[a-f0-9]{64}\.json$/.test(file.name)) continue
+      const key=file.name.slice(0,-5)
+      if (key.slice(0,2)!==bucket.name || state.backlog?.[key]) continue
+      unlinkSync(join(store.directory,bucket.name,file.name))
+      removed++
+    }
+  }
+  return removed
+}

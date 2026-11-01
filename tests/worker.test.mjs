@@ -18,7 +18,7 @@ test('queue persists across restart, deduplicates, and prioritizes explicit Slac
     assert.equal(first.jobs[first.pending[0]].target.slackMember, true)
     clock = 3000
     const second = await runWorker(options)
-    assert.deepEqual(second.jobs, first.jobs)
+    assert.deepEqual(second.jobs, Object.fromEntries(Object.entries(first.jobs).map(([key,job])=>[key,{...job,lastDiscoveredAt:clock}])))
     assert.equal(workerStatus(directory).lock, null)
   } finally { rmSync(directory, { recursive: true }) }
 })

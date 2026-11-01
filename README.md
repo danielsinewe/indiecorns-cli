@@ -241,9 +241,14 @@ link attribution; a link alone is not proof of authorship. The worker keeps up t
 2,000 job payloads loaded between cycles and stores overflow in a private disk-backed
 backlog. Due jobs return automatically, retaining their observation cooldowns and
 deduplication keys across restarts. `worker status` includes the backlog index;
-cycle output reports total pending, loaded and backlog counts. The index, payload
-files and action receipts grow with discovered targets; long-term retention remains
-release work. Additional engagement adapters are still pending: a successful
+cycle output reports total pending, loaded and backlog counts. A daily retention
+sweep retires successfully observed targets not rediscovered for 30 days and removes
+their old local briefs. Unobserved work, unfinished external actions, completed
+external-action receipts and daily quotas are preserved. Unreferenced backlog files
+are removed only after committing state. Expired robots caches are reclaimed once
+host cooldowns have elapsed. `worker status` includes retention counts and cleanup
+health. Pending work and external receipts still consume disk as the community grows.
+Additional engagement adapters are still pending: a successful
 scrape never counts as a follow, vote, rating, comment, or completed support action.
 
 `worker install` registers a macOS launchd agent, a Linux systemd user service,
