@@ -289,17 +289,23 @@ successfully observed target. Read them with `indiecorns worker briefs`.
 Briefs contain source URLs, observed metadata and timestamps; they are not posted
 or counted as engagement. `worker policy --mode collect` disables action work.
 
-The first external adapter supports GitHub stars, using a configured credential
-and an exact repository allowlist. Execution policies bind to the current
+External adapters support GitHub stars and member follows, using a configured
+credential and separate exact repository/user allowlists. Execution policies bind to the current
 community account and must be reconfigured after an account change:
 
 ```bash
 indiecorns worker policy --mode execute --github-repository maker/project --max-external-per-day 5
+indiecorns worker policy --mode execute --github-user maker --max-external-per-day 5
 indiecorns worker credentials --provider github --token-stdin < /secure/path/github-token
 ```
 
-This only acts on allowlisted GitHub repository targets whose public page was
-observed. Repository links on known member profiles are discovered automatically.
+This only acts on allowlisted GitHub repository or profile targets whose public
+page was observed. An existing version-1 policy without `githubUsers` permits no
+follows. Both action kinds share one daily budget and provider cooldown, and
+Slack-member priority determines their order. Repository links on known member
+profiles are discovered automatically. A follow needs a classic token with
+`user:follow`, or a fine-grained token with Followers read/write permissions.
+Missing permissions are reported as `github_permission_required`.
 It does not turn other links or page instructions into actions. The worker
 persists intent and quota before writing, checks the remote state before and
 after the idempotent request, and records unavailable proof as `unverified`.

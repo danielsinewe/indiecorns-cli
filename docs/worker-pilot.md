@@ -8,7 +8,7 @@ briefs. The shared community feed verifies eight active human Slack members.
 Two exact member mappings cover four public profiles; newly mapped targets were
 picked up during the normal unattended refresh and received owner priority.
 
-The pilot retains 43 targets, one completed GitHub-star receipt and one daily
+The pilot retains 66 targets, one completed GitHub-star receipt and one daily
 external-action attempt. The star was independently verified remotely. Its
 account-bound policy permits only the designated repository; this is not broad
 permission to write messages or perform other platform actions.
@@ -36,20 +36,26 @@ This bounds loaded payloads, not total disk usage.
 
 Native macOS, Linux and Windows CI previously verified packaged startup, Linux
 systemd supervision, Windows Task Scheduler startup and crash recovery, and
-permanent runtime operation after removal of the npm execution cache. The current
-0.4.2 candidate adds archived-priority regression coverage. Local validation passes
-72 tests, smoke/pack checks and packaged runtime verification. Cross-platform CI
-must pass for this candidate before it is merged.
+permanent runtime operation after removal of the npm execution cache. Release
+0.4.2 is published as npm latest through validated GitHub trusted publishing.
+An isolated public-registry installation and a real managed-service migration
+passed. The Mac service recovered after its npm cache was deleted and its process
+was forcibly terminated, retaining all 66 targets, its receipt and daily quota.
+
+The 0.4.3 candidate adds opt-in GitHub follows under a separate exact user
+allowlist, sharing the star adapter’s quota and provider cooldown. Local validation
+passes 77 tests and packaged startup verification. No follow has been executed in
+the pilot: the existing credential lacks the required provider permission, and
+the current policy enables no follows. Cross-platform CI must pass before release.
 
 ## Remaining release and validation work
 
-- Publish the reviewed candidate and verify installation from the public npm
-  registry outside this checkout. npm requires password/security-key
-  reauthentication; both available publishing paths failed authentication.
-- Switch the Mac pilot from its checkout to the verified published runtime.
+- Release the reviewed follow candidate and verify the installed runtime.
+- Validate a real account-authorized follow when provider authentication and the
+  pilot’s unchanged daily quota permit it.
 - Validate sustained unattended operation beyond the pilot so far. The machine
   must be awake and online; no full-day, logout or sleep-continuity claim is made.
-- Extend platform action support beyond the current GitHub-star adapter and local
+- Extend platform action support beyond the GitHub adapters and local
   briefs. Other platforms’ engagement actions are not implemented by this worker.
 - Continue validating storage growth as community volume increases; durable
   pending work and receipts deliberately have no automatic hard disk quota.
