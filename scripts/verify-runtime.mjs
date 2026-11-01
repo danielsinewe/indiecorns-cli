@@ -1,7 +1,7 @@
 import {mkdtempSync,mkdirSync,rmSync} from 'node:fs'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
-import {execFileSync} from 'node:child_process'
+import {execFileSync,spawnSync} from 'node:child_process'
 import {prepareServiceRuntime} from '../indiecorns/lib/runtime.mjs'
 
 const directory=mkdtempSync(join(tmpdir(),'indiecorns-runtime-install-'))
@@ -17,8 +17,13 @@ try {
   const runtime=prepareServiceRuntime({home:directory,cli:join(cache,'indiecorns','bin','indiecorns.mjs'),
     install:({directory:destination})=>runNpm(['install','--prefix',destination,'--ignore-scripts','--omit=dev','--no-audit','--no-fund',archive])})
   rmSync(join(directory,'cache'),{recursive:true})
+  const environment={...process.env,HOME:directory,USERPROFILE:directory,INDIECORNS_TELEMETRY_DISABLED:'1',INDIECORNS_TOKEN:'',INDIECORNS_GITHUB_TOKEN:'',INDIECORNS_SLACK_TOKEN:''}
   const status=JSON.parse(execFileSync(process.execPath,[runtime.cli,'worker','status','--no-telemetry'],{
-    encoding:'utf8',env:{...process.env,HOME:directory,USERPROFILE:directory,INDIECORNS_TELEMETRY_DISABLED:'1'},stdio:['ignore','pipe','pipe']}))
+    encoding:'utf8',env:environment,stdio:['ignore','pipe','pipe']}))
   if(status.lock!==null || status.state!==null) throw new Error('Unexpected clean runtime state')
-  console.log('Verified packaged runtime with real npm dependencies after removing its npx cache.')
+  const started=spawnSync(process.execPath,[runtime.cli,'worker','run','--once','--no-telemetry'],{encoding:'utf8',env:environment})
+  if(started.status!==1 || JSON.parse(started.stdout).lastError!=='auth_required') throw new Error('Permanent worker did not run its authenticated-discovery check')
+  const persisted=JSON.parse(execFileSync(process.execPath,[runtime.cli,'worker','status','--no-telemetry'],{encoding:'utf8',env:environment,stdio:['ignore','pipe','pipe']}))
+  if(persisted.lock!==null || persisted.state?.lastError!=='auth_required') throw new Error('Permanent worker state did not survive its process exit')
+  console.log('Verified packaged worker startup and persisted state after removing its npx cache.')
 }finally{rmSync(directory,{recursive:true,force:true})}

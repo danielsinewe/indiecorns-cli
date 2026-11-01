@@ -83,6 +83,6 @@ runtime when invoked from `npx`, while reusing global installs and checkouts.
 Registration stores the real executable paths for later uninstall, and cleanup
 retains the active release plus one rollback release. A real packaged npm install
 was exercised in an isolated temporary home: after deleting the execution cache,
-the permanent packaged CLI still imported its dependencies and returned the clean
-worker status. All temporary test files were removed. This package-level check
+the permanent packaged CLI still imported its dependencies, started its worker,
+persisted the expected authentication-required state, and released its lock. All temporary test files were removed. This package-level check
 is also part of three-OS CI; public-registry release verification is still pending.
