@@ -27,7 +27,7 @@ export function targetKey(target) {
 export function enqueue(state, targets, now) {
   const candidates = targets.map(raw => {
     const target = Object.fromEntries(['platform', 'eventType', 'targetType', 'targetSource', 'userId', 'username',
-      'displayName', 'profileUrl', 'targetUrl', 'source', 'discoveredFrom', 'attribution'].flatMap(key =>
+      'displayName', 'profileUrl', 'targetUrl', 'source', 'discoveredFrom', 'attribution', 'sharedBySlackUserId', 'slackChannelId', 'slackMessageUrl'].flatMap(key =>
       typeof raw[key] === 'string' ? [[key, raw[key].slice(0, key.toLowerCase().includes('url') || key === 'discoveredFrom' ? 2048 : 256)]] : []))
     target.slackMember = raw.slackMember === true
     return {key: targetKey(target), target}
@@ -39,6 +39,7 @@ export function enqueue(state, targets, now) {
     const existing = state.jobs[key]
     if (existing) {
       // Membership evidence can change while a target remains in the queue.
+      existing.target = {...existing.target,...target}
       existing.target.slackMember = target.slackMember
       existing.priority = target.slackMember ? 0 : 1
       continue
@@ -96,7 +97,20 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         state.lastPollAt = now()
         state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
-      if (prioritize) await prioritize(state, signal)
+      if (prioritize) {
+        try { await prioritize(state, signal, () => saveState(path, state)) }
+        catch {
+          if (signal?.aborted) break
+          state.slackHealth = 'source_unavailable'
+          state.priorityNextPollAt = now() + 300000
+          for (const job of Object.values(state.jobs)) {
+            job.target.slackMember = false
+            job.slackEvidence = null
+            job.priority = 2
+            job.priorityReason = 'community_target'
+          }
+        }
+      }
       state.pending = Object.values(state.jobs).filter(job => job.status === 'queued')
         .sort((a, b) => a.priority - b.priority || a.discoveredAt - b.discoveredAt).map(job => job.key)
       // Save discovery and scheduling before any outbound page request.
@@ -125,14 +139,15 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         .sort((a, b) => a.priority - b.priority || a.discoveredAt - b.discoveredAt).map(job => job.key)
       saveState(path, state)
       if (act && state.lastError !== 'auth_required' && !signal?.aborted) {
-        await act(state, signal, () => saveState(path, state))
+        try { await act(state, signal, () => saveState(path, state)) }
+        catch { state.actionHealth = 'action_configuration_failed' }
         saveState(path, state)
       }
       onCycle({ pending: state.pending.length, lastError: state.lastError, nextPollAt: state.nextPollAt })
       if (once) return state
       const dueObservations = observe && state.lastError !== 'auth_required'
         ? Object.values(state.jobs).filter(job => job.status === 'queued').map(job => job.nextObserveAt ?? now()) : []
-      const wakeAt = Math.min(state.nextPollAt, ...dueObservations)
+      const wakeAt = Math.min(state.nextPollAt, state.priorityNextPollAt ?? Infinity, ...dueObservations)
       await sleep(Math.max(100, wakeAt - now()), undefined, {signal})
         .catch(error => { if (error.name !== 'AbortError') throw error })
     } while (!signal?.aborted)

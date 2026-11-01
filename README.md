@@ -246,7 +246,8 @@ scrape never counts as a follow, vote, rating, comment, or completed support act
 or a Windows scheduled task with automatic recovery. These services start on user login; the computer must be
 awake and online to work. Linux operation after logout needs user lingering
 configured on the host. Windows tasks run for the logged-in user with no time
-limit, a one-minute failure restart, and a five-minute recurring recovery trigger.
+limit, a hidden parent that restarts a failed worker after 30 seconds, a one-minute
+parent failure restart, and a five-minute recurring recovery trigger.
 A hidden PowerShell launcher keeps the worker in the background. Services discard
 stdout/stderr to prevent unbounded logs; inspect `worker status` for persisted
 health. Reinstall after moving the CLI or Node executable.
@@ -289,6 +290,21 @@ worker verifies the workspace with `auth.test`, follows all
 and refreshes membership hourly. Identity mappings
 must be established from member-provided links; the worker does not guess them.
 
-The current Mac pilot uses a browser-verified roster snapshot and one explicit
-member/project mapping. Continuous Slack API refresh and a real external-action
-pilot remain unverified.
+Configure a public Slack channel after supplying its read-only credential:
+
+```bash
+indiecorns worker credentials --provider slack --token-stdin < /secure/path/slack-token
+indiecorns worker slack configure --workspace T012ABC --channel C012DEF
+indiecorns worker slack status
+```
+
+The app needs `channels:read`, `channels:history` and `users:read`, and must be
+added to that channel. The worker reads new channel messages every five minutes
+and resumes history pagination through a saved opaque cursor. It extracts public
+links from active members and stores provenance, not message bodies. Verified
+member-owned targets come first, then links shared by members, then other
+community targets. A shared link does not establish external project ownership.
+API rate limits and pending pages retain their deadlines across restarts.
+
+The current Mac pilot has verified live API roster refresh and automatic
+channel-link discovery. A real external-action pilot is still outstanding.

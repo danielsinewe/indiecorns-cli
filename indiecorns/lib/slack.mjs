@@ -41,9 +41,13 @@ export function slackSeedTargets(snapshot, now=Date.now()) {
 export function prioritizeSlack(state, snapshot, now=Date.now()) {
   for (const job of Object.values(state.jobs)) {
     const evidence=slackMembership(snapshot,job.target,now)
+    const shared=Boolean(snapshot && snapshot.observedAt<=now && snapshot.expiresAt>now &&
+      job.target.slackChannelId===snapshot.channelId && snapshot.memberIds.includes(job.target.sharedBySlackUserId))
     job.slackEvidence=evidence
     job.target.slackMember=Boolean(evidence)
-    job.priority=evidence?0:1
+    job.priority=evidence?0:shared?1:2
+    job.priorityReason=evidence?'verified_slack_owner':shared?'slack_member_shared':'community_target'
+
   }
   state.slackHealth=!snapshot?'not_configured':snapshot.expiresAt<=now || snapshot.observedAt>now?'evidence_expired':'verified'
   state.slackMemberCount=state.slackHealth==='verified'?snapshot.memberIds.length:0
@@ -86,6 +90,67 @@ export async function refreshSlackEvidence({ snapshot:input,token,request=fetch,
     if (data.user?.id!==member || typeof data.user.is_bot!=='boolean' || typeof data.user.deleted!=='boolean') throw new Error('Invalid Slack user response')
     if (!data.user.is_bot && !data.user.deleted) activeMembers.push(member)
   }
-  const updated={...snapshot,source:'slack_web_api',memberIds:activeMembers,observedAt:now(),expiresAt:now()+86400000}
+  let workspaceUrl=snapshot.workspaceUrl
+  if (typeof auth.url==='string') {
+    const candidate=new URL(auth.url)
+    if (candidate.protocol==='https:' && candidate.hostname.endsWith('.slack.com') && !candidate.username && !candidate.password) workspaceUrl=candidate.origin
+  }
+  const updated={...snapshot,workspaceUrl,source:'slack_web_api',memberIds:activeMembers,observedAt:now(),expiresAt:now()+86400000}
   return validateSlackEvidence(updated)
+}
+
+export function sharedTargets(messages, snapshot, now=Date.now()) {
+  validateSlackEvidence(snapshot)
+  if (snapshot.expiresAt<=now || snapshot.observedAt>now) return []
+  const members=new Set(snapshot.memberIds)
+  const targets=new Map()
+  for (const message of messages) {
+    if (!members.has(message.user) || typeof message.text!=='string' || !/^\d+\.\d{6}$/.test(message.ts ?? '')) continue
+    const links=new Set([...message.text.matchAll(/https:\/\/[^\s<>|]+/g)].map(match=>match[0].replace(/&amp;/g,'&')))
+    for (const value of links) {
+      try {
+        const url=new URL(value)
+        if (url.username || url.password || url.port || url.href.length>2048) continue
+        const host=url.hostname.replace(/^www\./,'')
+        const segments=url.pathname.split('/').filter(Boolean)
+        let platform='website',targetType='link'
+        if (host==='peerlist.io') {platform='peerlist';targetType=segments.includes('project')?'project':segments.includes('post')?'post':'profile'}
+        if (host==='x.com' || host==='twitter.com') {platform='x';targetType=segments.includes('status')?'post':'profile'}
+        if (host==='linkedin.com') {platform='linkedin';targetType=segments.includes('posts') || segments.includes('feed')?'post':'profile'}
+        if (host==='producthunt.com') {platform='producthunt';targetType=segments[0]==='posts'?'project':segments[0]==='p'?'post':'link'}
+        if (host==='github.com') {platform='github';targetType=segments.length===2?'project':'link'}
+        url.hash=''
+        targets.set(url.href,{platform,eventType:'inspect',targetType,profileUrl:url.href,
+          ...(['peerlist','x'].includes(platform) && segments[0] && !['scroll','search','explore','home'].includes(segments[0]) ? {username:segments[0]} : {}),source:'slack_channel_shared',
+          attribution:'shared_link_owner_unverified',sharedBySlackUserId:message.user,slackChannelId:snapshot.channelId,
+          slackMessageUrl:snapshot.workspaceUrl?`${snapshot.workspaceUrl}/archives/${snapshot.channelId}/p${message.ts.replace('.','')}`:`https://app.slack.com/client/${snapshot.workspaceId}/${snapshot.channelId}`})
+      } catch {}
+    }
+  }
+  return [...targets.values()]
+}
+
+export async function discoverSlackShared({snapshot:input,token,cursor='',oldest='0',request=fetch,signal,now=Date.now()}) {
+  const snapshot=validateSlackEvidence(input)
+  if (snapshot.expiresAt<=now || snapshot.observedAt>now) throw new Error('Fresh Slack membership required')
+  if (!token) throw new Error('Slack credential required')
+  const response=await request('https://slack.com/api/conversations.history',{method:'POST',
+    headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({channel:snapshot.channelId,limit:'100',oldest,inclusive:'false',...(cursor?{cursor}:{})}).toString(),redirect:'error',
+    signal:AbortSignal.any([signal ?? new AbortController().signal,AbortSignal.timeout(30000)])})
+  if(response.status===429) {
+    const retryAfterMs=retryDelay(response.headers.get('retry-after'))
+    await response.body?.cancel()
+    throw Object.assign(new Error('Slack history rate limited'),{retryAfterMs})
+  }
+  if(!response.ok){await response.body?.cancel();throw new Error('Slack history unavailable')}
+  const data=JSON.parse(await boundedText(response))
+  if(!data.ok || !Array.isArray(data.messages)) {
+    const code=['not_in_channel','missing_scope','channel_not_found','invalid_auth','token_revoked'].includes(data.error)?data.error:'history_unavailable'
+    throw Object.assign(new Error('Slack history unavailable'),{code})
+  }
+  if (data.has_more && !data.response_metadata?.next_cursor?.trim()) throw new Error('Slack history pagination incomplete')
+  const timestamps=data.messages.map(message=>message.ts).filter(ts=>/^\d+\.\d{6}$/.test(ts ?? ''))
+  const latest=timestamps.reduce((a,b)=>BigInt(b.replace('.',''))>BigInt(a.replace('.',''))?b:a,'0.000000')
+  return {targets:sharedTargets(data.messages,snapshot,now),cursor:data.response_metadata?.next_cursor?.trim() ?? '',latest}
 }

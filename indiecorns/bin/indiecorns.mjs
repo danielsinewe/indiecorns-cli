@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url"
 import { spawnSync } from "node:child_process"
 
 import { credential, storeCredential } from "../lib/credentials.mjs"
-import { validateSlackEvidence, slackSeedTargets, prioritizeSlack, refreshSlackEvidence } from "../lib/slack.mjs"
+import { validateSlackEvidence, slackSeedTargets, prioritizeSlack, refreshSlackEvidence, discoverSlackShared } from "../lib/slack.mjs"
 import { defaultPolicy, validatePolicy, runActions } from "../lib/actions.mjs"
 import { discoverCommunity } from "../lib/discovery.mjs"
 import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
@@ -6578,7 +6578,7 @@ const main = async () => {
     case "worker": {
       const directory = join(configDir, "worker")
       const slackPath = join(directory, "slack-evidence.json")
-      const updateSlack = async (state, signal) => {
+      const updateSlack = async (state, signal, checkpoint) => {
         let snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath, "utf8"))) : null
         const token = credential(directory, "slack")
         if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
@@ -6592,8 +6592,47 @@ const main = async () => {
             state.slackSyncError = "membership_refresh_failed"
           }
         }
+        if (snapshot && token && snapshot.expiresAt > Date.now()) {
+          state.slackHistory ??= {oldest:"0",cursor:"",latest:"0.000000",nextPollAt:0}
+          const history = state.slackHistory
+          if (history.nextPollAt <= Date.now()) {
+            // Reserve the API interval before requesting, including across crashes.
+            history.nextPollAt = Date.now() + 60000
+            checkpoint()
+            try {
+              const result = await discoverSlackShared({snapshot,token,cursor:history.cursor,oldest:history.oldest,signal})
+              enqueue(state, result.targets, Date.now())
+              if (BigInt(result.latest.replace(".","")) > BigInt(history.latest.replace(".",""))) history.latest = result.latest
+              if (result.cursor && result.cursor === history.cursor) throw new Error("Repeated Slack history cursor")
+              history.cursor = result.cursor
+              if (!history.cursor) { history.oldest = history.latest; history.nextPollAt = Date.now() + 300000 }
+              history.health = "ok"
+            } catch (error) {
+              history.nextPollAt = Date.now() + Math.max(60000,error.retryAfterMs ?? 300000)
+              history.health = error.code ?? "history_unavailable"
+            }
+          }
+        }
         enqueue(state, slackSeedTargets(snapshot), Date.now())
         prioritizeSlack(state, snapshot)
+        state.priorityNextPollAt = token && snapshot ? Math.min(state.slackNextRefreshAt ?? Date.now(),
+          snapshot.expiresAt > Date.now() ? state.slackHistory?.nextPollAt ?? Infinity : Infinity) : undefined
+      }
+      if (args[0] === "slack") {
+        if (args[1] === "configure") {
+          const observedAt = Date.now() - 1
+          const previous = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath,"utf8"))) : null
+          let snapshot = validateSlackEvidence({version:1,source:"configured",workspaceId:flags.workspace,channelId:flags.channel,
+            memberIds:[],identities:previous?.workspaceId === flags.workspace ? previous.identities : [],observedAt,expiresAt:observedAt+1})
+          const token = credential(directory, "slack")
+          if (token) snapshot = await refreshSlackEvidence({snapshot,token})
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(slackPath,snapshot)
+        }
+        const snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath,"utf8"))) : null
+        printJson(snapshot ? {configured:true,workspaceId:snapshot.workspaceId,channelId:snapshot.channelId,source:snapshot.source,
+          observedAt:snapshot.observedAt,expiresAt:snapshot.expiresAt,members:snapshot.memberIds.length} : {configured:false})
+        return 0
       }
       const accountRevision = () => createHash("sha256").update(JSON.stringify({
         appUrl: getAppUrl(flags),

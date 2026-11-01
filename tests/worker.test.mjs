@@ -122,3 +122,18 @@ test('discovery upgrades wake healthy schedules and preserve server cooldowns', 
     assert.equal(polls,2)
   }finally{rmSync(directory,{recursive:true})}
 })
+
+test('broken optional priority or action configuration does not stop discovery and observation', async()=>{
+  const directory=fixture()
+  try{
+    const state=await runWorker({directory,once:true,now:()=>1000,discover:async()=>[target('maker',true)],
+      prioritize:async()=>{throw new Error('invalid configuration')},
+      observe:async()=>({status:'observed',title:'Maker'}),
+      act:async()=>{throw new Error('invalid policy')}})
+    assert.equal(state.lastError,null)
+    assert.equal(state.slackHealth,'source_unavailable')
+    assert.equal(state.actionHealth,'action_configuration_failed')
+    assert.equal(Object.values(state.jobs)[0].priority,2)
+    assert.equal(Object.values(state.jobs)[0].observation.status,'observed')
+  }finally{rmSync(directory,{recursive:true})}
+})

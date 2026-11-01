@@ -23,7 +23,7 @@ export function supportBrief(job) {
 export function githubRepository(target) {
   try {
     const url=new URL(target.profileUrl ?? target.targetUrl)
-    if (target.platform !== 'github' || target.eventType !== 'star' || url.origin !== 'https://github.com' || url.search || url.hash || url.username || url.password) return null
+    if (target.platform !== 'github' || !['star','inspect'].includes(target.eventType) || url.origin !== 'https://github.com' || url.search || url.hash || url.username || url.password) return null
     const parts=url.pathname.split('/').filter(Boolean)
     if (parts.length !== 2 || parts.some(part=>! /^[A-Za-z0-9_.-]+$/.test(part) || part === '.' || part === '..')) return null
     return parts.join('/').toLowerCase()

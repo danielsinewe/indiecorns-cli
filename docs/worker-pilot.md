@@ -17,9 +17,9 @@ metadata parsing, attribution, crash recovery, ownership, corrupt-state handling
 deduplication, independent observation scheduling, and service configuration.
 
 Remaining goal requirements:
-- Complete ongoing Slack API refresh and map the remaining community identities.
+- Extend exact public-profile mappings beyond the first verified member.
 - Validate real external actions and add the remaining platform executors.
-- Validate Windows scheduled startup/crash recovery; Linux startup is CI-verified.
+- Keep startup/recovery verification passing on all three supported operating systems.
 - Handle discovery pagination/capacity and long-term retention at larger scale.
 - Publish the reviewed CLI release and verify installation outside this checkout.
 - Validate sustained unattended operation, beyond the short pilot so far.
@@ -45,3 +45,19 @@ login/recurring triggers, no runtime limit, and crash restart. CI checks out the
 repository into a path containing spaces on all operating systems and adds an
 actual Windows scheduled-start/forced-crash test. This checkpoint does not yet
 claim that the Windows supervision test has passed.
+
+Subsequent verification: Windows Task Scheduler startup and forced worker crash
+recovery passed in CI run 41320012015 at commit 89328c0, together with the macOS
+and Linux checks. The launcher supervises child exits directly every 30 seconds;
+Task Scheduler separately recovers parent exits. No Mac restart was needed for
+these Windows-only changes.
+
+The existing community Slack app was authorized for three read-only scopes and
+added to the configured community channel. Its credential is stored privately,
+not in the repository. Live API roster verification returned eight active human
+members. The running Mac worker independently refreshed that roster and scheduled
+its next refresh. A live channel-history read found 11 shared links across five
+platform types. The worker now has 14 deduplicated targets and has produced eight
+local briefs at the latest inspection. Shared-link priority does not assert that
+the sharing member owns the linked external project. Message bodies are not
+persisted. External engagement has still not been executed in the pilot.

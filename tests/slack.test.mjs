@@ -19,7 +19,7 @@ test('expired or removed channel membership withdraws priority without deleting 
   prioritizeSlack(state,snapshot(),5000)
   assert.equal(state.jobs.sample.priority,0)
   prioritizeSlack(state,snapshot(),100001)
-  assert.equal(state.jobs.sample.priority,1)
+  assert.equal(state.jobs.sample.priority,2)
   assert.equal(state.slackHealth,'evidence_expired')
   assert.equal(Object.keys(state.jobs).length,1)
 })
@@ -52,4 +52,42 @@ test('Slack bots and deleted accounts are excluded from membership priority',asy
     url.endsWith('conversations.members')?{ok:true,members:['UMEMBER','UBOT','UDELETED']}:
     {ok:true,user:{id:new URLSearchParams(options.body).get('user'),is_bot:options.body.includes('UBOT'),deleted:options.body.includes('UDELETED')}})})
   assert.deepEqual(result.memberIds,['UMEMBER'])
+})
+
+import {sharedTargets,discoverSlackShared} from '../indiecorns/lib/slack.mjs'
+
+test('channel discovery extracts public links from active members without claiming external ownership',()=>{
+  const s=snapshot()
+  const targets=sharedTargets([
+    {user:'UMEMBER',ts:'1000.000001',text:'My project <https://peerlist.io/maker/project/app|app> and https://github.com/maker/project'},
+    {user:'UNONMEMBER',ts:'1000.000002',text:'https://other.example/'},
+    {user:'UMEMBER',ts:'1000.000003',text:'<mailto:person@example.com> <https://user:secret@example.com/private>'},
+  ],s,5000)
+  assert.equal(targets.length,2)
+  assert.equal(targets[0].attribution,'shared_link_owner_unverified')
+  assert.ok(targets.every(target=>!target.slackMember))
+  assert.equal(targets[1].platform,'github')
+  assert.equal('text' in targets[0],false)
+  const state={jobs:{shared:{target:targets[1]},other:{target:{profileUrl:'https://example.com/other'}}}}
+  prioritizeSlack(state,s,5000)
+  assert.equal(state.jobs.shared.priority,1)
+  assert.equal(state.jobs.shared.target.slackMember,false)
+  assert.equal(state.jobs.other.priority,2)
+})
+
+test('Slack history preserves precise timestamps and opaque pagination cursors',async()=>{
+  const result=await discoverSlackShared({snapshot:snapshot(),token:'secret',oldest:'999.000000',cursor:'opaque',now:5000,
+    request:async(url,options)=>{
+      assert.equal(url,'https://slack.com/api/conversations.history')
+      const form=new URLSearchParams(options.body)
+      assert.equal(form.get('channel'),'CTEST')
+      assert.equal(form.get('cursor'),'opaque')
+      assert.equal(form.get('oldest'),'999.000000')
+      return Response.json({ok:true,messages:[{user:'UMEMBER',ts:'1000.000001',text:'https://example.com/project'}],response_metadata:{next_cursor:'next'}})
+    }})
+  assert.equal(result.cursor,'next')
+  assert.equal(result.latest,'1000.000001')
+  assert.equal(result.targets.length,1)
+  await assert.rejects(discoverSlackShared({snapshot:snapshot(),token:'secret',now:5000,
+    request:async()=>new Response(null,{status:429,headers:{'retry-after':'180'}})}),e=>e.retryAfterMs===180000)
 })

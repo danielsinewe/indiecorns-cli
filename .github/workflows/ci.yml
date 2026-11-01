@@ -95,4 +95,9 @@ jobs:
             throw
           } finally {
             node indiecorns/bin/indiecorns.mjs worker uninstall --no-telemetry
+            if ($replacementWorkerPid) {
+              $workerDeadline = [DateTime]::UtcNow.AddSeconds(10)
+              while ((Get-Process -Id $replacementWorkerPid -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $workerDeadline) { Start-Sleep -Seconds 1 }
+              if (Get-Process -Id $replacementWorkerPid -ErrorAction SilentlyContinue) { throw "Worker remained running after uninstall" }
+            }
           }
