@@ -237,9 +237,13 @@ It neither executes page scripts nor follows redirects implicitly. A site that
 requires browser rendering, login, or a redirect remains explicitly unresolved.
 Observations refresh every six hours independently of API discovery. Links to
 posts and projects under the same member path enter the queue with unverified
-link attribution; a link alone is not proof of authorship. The queue stops adding
-new targets at 2,000 entries and reports `queue_capacity`; it never silently drops
-unprocessed targets. External engagement adapters are still pending: a successful
+link attribution; a link alone is not proof of authorship. The worker keeps up to
+2,000 job payloads loaded between cycles and stores overflow in a private disk-backed
+backlog. Due jobs return automatically, retaining their observation cooldowns and
+deduplication keys across restarts. `worker status` includes the backlog index;
+cycle output reports total pending, loaded and backlog counts. The index, payload
+files and action receipts grow with discovered targets; long-term retention remains
+release work. Additional engagement adapters are still pending: a successful
 scrape never counts as a follow, vote, rating, comment, or completed support action.
 
 `worker install` registers a macOS launchd agent, a Linux systemd user service,

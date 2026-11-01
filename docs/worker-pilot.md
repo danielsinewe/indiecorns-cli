@@ -20,7 +20,7 @@ Remaining goal requirements:
 - Extend exact public-profile mappings beyond the first verified member.
 - Add the remaining platform executors; a real GitHub action is now verified.
 - Keep startup/recovery verification passing on all three supported operating systems.
-- Handle discovery pagination/capacity and long-term retention at larger scale.
+- Handle discovery pagination and long-term retention at larger scale.
 - Publish the reviewed CLI release and verify installation outside this checkout.
 - Validate sustained unattended operation, beyond the short pilot so far.
 
@@ -73,8 +73,8 @@ after execution. The receipt records `alreadyPresent: false`. After restart the
 receipt timestamp and daily attempt count remained unchanged at one.
 
 At this inspection the live pilot has 41 targets and 35 local briefs. The code
-has 48 passing local tests. Windows startup/recovery/cleanup passed in CI run
-41321015554 at commit 46c37f8. Remaining release and scale work is still open;
+has 54 passing local tests. Windows startup/recovery/cleanup and permanent-runtime
+installation passed in three-OS CI run 41323577404 at commit a793de0. Remaining release and scale work is still open;
 this is not a claim that every platform can execute engagement actions.
 
 The background installer now avoids disposable npm execution-cache paths. It
@@ -86,3 +86,13 @@ was exercised in an isolated temporary home: after deleting the execution cache,
 the permanent packaged CLI still imported its dependencies, started its worker,
 persisted the expected authentication-required state, and released its lock. All temporary test files were removed. This package-level check
 is also part of three-OS CI; public-registry release verification is still pending.
+
+The former 2,000-target admission failure is replaced by a durable payload backlog.
+An isolated 2,050-target test accepts the whole batch, observes a Slack member first,
+then repeatedly restarts and rediscovers the batch without resetting observation
+cooldowns or losing targets. Each completed cycle leaves at most 2,000 loaded jobs.
+Cold payloads are atomically written before the state index is committed and retained
+after promotion, so the previously committed state can still recover after a crash.
+Missing payloads fail closed while preserving the committed index and action receipts.
+This bounds loaded job payloads, not total disk consumption: the compact index and
+durable evidence still grow; automatic age-based retention is not yet implemented.

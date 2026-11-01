@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runWorker, workerStatus } from '../indiecorns/lib/worker.mjs'
+import { runWorker, workerStatus, targetKey } from '../indiecorns/lib/worker.mjs'
 const target = (path, slackMember = false) => ({ platform: 'x', eventType: 'like', profileUrl: `https://x.com/${path}`, slackMember })
 const fixture = () => mkdtempSync(join(tmpdir(), 'indiecorns-worker-'))
 
@@ -136,4 +136,52 @@ test('broken optional priority or action configuration does not stop discovery a
     assert.equal(Object.values(state.jobs)[0].priority,2)
     assert.equal(Object.values(state.jobs)[0].observation.status,'observed')
   }finally{rmSync(directory,{recursive:true})}
+})
+
+test('discovery above 2000 targets survives restart and continues observing the durable backlog', async()=>{
+  const directory=fixture()
+  const targets=Array.from({length:2050},(_,index)=>target(`maker${index}`,index===2049))
+  const observed=new Set()
+  const observe=async item=>{
+    const key=targetKey(item)
+    assert.equal(observed.has(key),false,'a six-hour observation must not repeat after restart')
+    observed.add(key)
+    return {status:'observed',observedAt:1000,contentHash:key}
+  }
+  try {
+    const first=await runWorker({directory,once:true,now:()=>1000,discover:async()=>targets,observe})
+    assert.equal(first.lastError,null)
+    assert.equal(Object.keys(first.jobs).length,2000)
+    assert.equal(Object.keys(first.backlog).length,50)
+    assert.ok(observed.has(targetKey(targets[2049])),'Slack member must be observed first')
+    assert.equal(Object.keys(workerStatus(directory).state.backlog).length,50)
+    // Reload from disk repeatedly, including rediscovery of cold jobs. Neither
+    // membership changes nor rediscovery may erase observation cooldowns.
+    for(let cycle=0;cycle<12;cycle++) {
+      const state=await runWorker({directory,once:true,now:()=>3000+cycle*1000,intervalMs:1000,
+        discover:async()=>targets,observe})
+      assert.equal(Object.keys(state.jobs).length+Object.keys(state.backlog).length,2050)
+      assert.ok(Object.keys(state.jobs).length<=2000)
+    }
+    assert.equal(observed.size,65)
+  } finally {rmSync(directory,{recursive:true})}
+})
+
+test('missing cold payload fails closed and leaves the committed index and action receipts intact',async()=>{
+  const directory=fixture()
+  try {
+    const first=await runWorker({directory,once:true,now:()=>1000,
+      discover:async()=>Array.from({length:2001},(_,index)=>target(`cold${index}`))})
+    const key=Object.keys(first.backlog)[0]
+    first.actions={receipt:{kind:'github_star',status:'completed'}}
+    // Force this cold job to be first due after restart.
+    first.backlog[key].priority=-1
+    writeFileSync(join(directory,'state.json'),JSON.stringify(first))
+    rmSync(join(directory,'queue',key.slice(0,2),`${key}.json`))
+    await assert.rejects(runWorker({directory,once:true,now:()=>1001,discover:async()=>[]}),{code:'ENOENT'})
+    const after=workerStatus(directory)
+    assert.equal(after.lock,null)
+    assert.ok(after.state.backlog[key])
+    assert.equal(after.state.actions.receipt.status,'completed')
+  } finally {rmSync(directory,{recursive:true})}
 })

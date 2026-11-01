@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync, renameSync, openSync, fsyncSync, closeSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { attachBacklog, restoreJob, restoreDueJobs, compactJobs, backlogSchedule, dueOrder } from './backlog.mjs'
 
 const read = (path, fallback) => {
   try { return JSON.parse(readFileSync(path, 'utf8')) }
@@ -32,10 +33,8 @@ export function enqueue(state, targets, now) {
     target.slackMember = raw.slackMember === true
     return {key: targetKey(target), target}
   })
-  if (new Set([...Object.keys(state.jobs), ...candidates.map(item => item.key)]).size > 2000) {
-    throw Object.assign(new Error('Queue capacity reached'), {code:'QUEUE_CAPACITY'})
-  }
   for (const { key, target } of candidates) {
+    restoreJob(state,key)
     const existing = state.jobs[key]
     if (existing) {
       // Membership evidence can change while a target remains in the queue.
@@ -67,6 +66,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
   try {
     const state = read(path, { version: 1, failures: 0, nextPollAt: 0, jobs: {} })
     if (state.version !== 1 || !state.jobs) throw new Error('Unsupported worker state')
+    attachBacklog(state,directory,saveState)
     if (authRevision && state.authRevision !== authRevision) {
       state.nextPollAt = 0
       state.authRevision = authRevision
@@ -97,6 +97,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         state.lastPollAt = now()
         state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
+      restoreDueJobs(state,now(),observationLimit)
       if (prioritize) {
         try { await prioritize(state, signal, () => saveState(path, state)) }
         catch {
@@ -117,7 +118,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
       saveState(path, state)
       if (observe && state.lastError !== 'auth_required') {
         state.hosts ??= {}
-        const due = state.pending.map(key => state.jobs[key]).filter(job => !job.nextObserveAt || job.nextObserveAt <= now())
+        const due = state.pending.map(key => state.jobs[key]).filter(job => !job.nextObserveAt || job.nextObserveAt <= now()).sort(dueOrder)
         for (const job of due.slice(0, observationLimit)) {
           if (signal?.aborted) break
           try {
@@ -155,11 +156,15 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         catch { state.actionHealth = 'action_configuration_failed' }
         saveState(path, state)
       }
-      onCycle({ pending: state.pending.length, lastError: state.lastError, nextPollAt: state.nextPollAt })
+      compactJobs(state)
+      state.pending=state.pending.filter(key=>state.jobs[key])
+      saveState(path,state)
+      onCycle({ pending: state.pending.length + Object.keys(state.backlog).length, loaded:state.pending.length,
+        backlog:Object.keys(state.backlog).length, lastError: state.lastError, nextPollAt: state.nextPollAt })
       if (once) return state
       const dueObservations = observe && state.lastError !== 'auth_required'
-        ? Object.values(state.jobs).filter(job => job.status === 'queued').map(job => job.nextObserveAt ?? now()) : []
-      const wakeAt = Math.min(state.nextPollAt, state.priorityNextPollAt ?? Infinity, ...dueObservations)
+        ? [...Object.values(state.jobs).filter(job => job.status === 'queued').map(job => job.nextObserveAt ?? now()),...backlogSchedule(state)] : []
+      const wakeAt = dueObservations.reduce((earliest,due)=>Math.min(earliest,due),Math.min(state.nextPollAt,state.priorityNextPollAt ?? Infinity))
       await sleep(Math.max(100, wakeAt - now()), undefined, {signal})
         .catch(error => { if (error.name !== 'AbortError') throw error })
     } while (!signal?.aborted)
