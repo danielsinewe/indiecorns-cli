@@ -150,3 +150,10 @@ test('reserved polls and search spacing survive restart without starving the nex
   await syncGithubMemberPosts({state:restored,snapshot:s,token:'secret',now:()=>clock,request:async()=>{throw Error('Poll must stay reserved')}})
   assert.equal(restored.githubMemberPosts.health,'ok')
 })
+
+test('primary provider reset timestamps use the same clock as durable poll reservations',async()=>{
+  const state={jobs:{}}
+  await syncGithubMemberPosts({state,snapshot:snapshot(),token:'secret',now:()=>NOW,
+    request:async()=>new Response(null,{status:403,headers:{'x-ratelimit-remaining':'0','x-ratelimit-reset':String((NOW+3600000)/1000)}})})
+  assert.equal(state.externalNextAttemptAt,NOW+3600000)
+})

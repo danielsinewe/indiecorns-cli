@@ -46,7 +46,7 @@ export async function syncGithubMemberPosts({state,snapshot,token,signal,checkpo
   if(!token){cache.health='credential_required';cache.nextPollAt=now()+HOUR;return}
   if((state.externalNextAttemptAt??0)>now()){cache.health='rate_limited';cache.nextPollAt=state.externalNextAttemptAt;return}
   const due=Object.values(cache.authors).filter(a=>a.nextPollAt<=now()).sort((a,b)=>a.nextPollAt-b.nextPollAt||a.key.localeCompare(b.key)).slice(0,2)
-  const options={token,request,signal:AbortSignal.any([signal??new AbortController().signal,AbortSignal.timeout(45000)])}
+  const options={token,request,now,signal:AbortSignal.any([signal??new AbortController().signal,AbortSignal.timeout(45000)])}
   for(const author of due){
     if(signal?.aborted)break
     // A reserved poll survives crashes; targets and page advancement commit together.
