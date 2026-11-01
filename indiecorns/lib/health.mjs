@@ -6,7 +6,7 @@ export const healthFileLimit=1048576
 const maximumGap=90000,maximumProgressAge=900000
 const phases=new Set(['starting','discover','prioritize','observe','derive','act','cycle','sleep'])
 const events=new Set(['start','heartbeat','stop'])
-const fields=['at','session','pid','event','phase','progressAt','sleepUntil','discoveryHealthy','communityHealthy','targets','clockBackwards']
+const fields=['at','session','pid','event','phase','progressAt','sleepUntil','discoveryHealthy','communityHealthy','githubPostsHealthy','targets','clockBackwards']
 const files=directory=>{
   try{return readdirSync(directory,{withFileTypes:true}).filter(f=>f.isFile()&&/^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f.name)).map(f=>join(directory,f.name))}
   catch(error){if(error.code==='ENOENT')return [];throw error}
@@ -16,6 +16,7 @@ const valid = r => r && Object.keys(r).every(k=>fields.includes(k)) &&
   typeof r.session==='string'&&/^[A-Za-z0-9-]{1,64}$/.test(r.session) && Number.isInteger(r.pid)&&r.pid>0 &&
   events.has(r.event)&&phases.has(r.phase) && (r.sleepUntil===null||Number.isFinite(r.sleepUntil)) &&
   typeof r.discoveryHealthy==='boolean' && [true,false,null].includes(r.communityHealthy) &&
+  (r.githubPostsHealthy===undefined||[true,false,null].includes(r.githubPostsHealthy)) &&
   Number.isInteger(r.targets)&&r.targets>=0 && typeof r.clockBackwards==='boolean'
 
 function readHistory(directory) {
@@ -59,7 +60,8 @@ export function summarizeHealth(records,{now=Date.now(),hours=24,anomalies={}}={
     latestState:!latest?'missing':latest.event==='stop'?'stopped':now-latest.at>maximumGap?'stale':'recent_sample',
     sampledMs,samplesInWindow:window.length,sessions:new Set(window.map(r=>r.session)).size,
     cleanStops:window.filter(r=>r.event==='stop').length,
-    unhealthySamples:window.filter(r=>!r.discoveryHealthy||r.communityHealthy===false).length,
+    unhealthySamples:window.filter(r=>!r.discoveryHealthy||r.communityHealthy===false||r.githubPostsHealthy===false).length,
+    githubPostsKnownSamples:window.filter(r=>typeof r.githubPostsHealthy==='boolean').length,
     clockAnomalies:future.length+window.filter(r=>r.clockBackwards).length,
     anomalies,latest}
 }
@@ -81,6 +83,9 @@ export function startHealthMonitor({directory,session,state,now=Date.now,schedul
         discoveryHealthy:state.lastError===null&&Number.isFinite(lastSuccess)&&at>=lastSuccess&&at-lastSuccess<=maximumProgressAge,
         communityHealthy:state.communityFeed?state.communityFeed.health==='ok'&&state.communityFeed.snapshot?.expiresAt>at
           :state.slackHealth?state.slackHealth==='verified':null,
+        ...(state.githubMemberPosts?{githubPostsHealthy:['ok','paging'].includes(state.githubMemberPosts.health)?
+          (Number.isFinite(state.githubMemberPosts.nextPollAt)?at<=state.githubMemberPosts.nextPollAt+maximumGap:null):
+          !state.githubMemberPosts.health||['credential_required','membership_required'].includes(state.githubMemberPosts.health)?null:false}:{}),
         targets:Object.keys(state.jobs).length+Object.keys(state.backlog??{}).length,clockBackwards:at<previousAt}
       if(!valid(row))throw new Error('Invalid health record')
       mkdirSync(root,{recursive:true,mode:0o700})

@@ -8,7 +8,7 @@ briefs. The shared community feed verifies eight active human Slack members.
 Two exact member mappings cover four public profiles; newly mapped targets were
 picked up during the normal unattended refresh and received owner priority.
 
-The pilot retains 66 targets, one completed GitHub-star receipt and one daily
+The pilot retains 70 targets, one completed GitHub-star receipt and one daily
 external-action attempt. The star was independently verified remotely. Its
 account-bound policy permits the designated repository and one member profile
 under the same daily quota; this is not broad
@@ -60,7 +60,7 @@ The live managed service recorded its first real minute heartbeat, with queue,
 policy, receipts and quota preserved. History began at 21:12 UTC on 1 November;
 earlier status checks are not retroactively converted into uptime samples.
 
-The 0.4.5 candidate discovers linked public issue indexes and posts from observed
+Release 0.4.5 discovers linked public issue indexes and posts from observed
 GitHub repositories and adds opt-in issue thumbs-up reactions. A separate exact
 issue allowlist is required; existing policies enable none. Tests cover public
 repository/actor proof, pagination, after-write verification, receipt recovery,
@@ -70,10 +70,22 @@ write intercepted before HTTP dispatch; no reaction was sent or recorded. Three
 checked community repositories had no issues, so no live issue was allowlisted.
 Issue listings refresh every fifteen minutes within the existing host budgets.
 Local validation passes 92 tests and packaged startup verification.
+Its public package and live managed-service upgrade passed, preserving accumulated
+health history. Four issue indexes were observed automatically; no reaction was
+enabled or executed.
+
+The 0.4.6 candidate adds read-only public search for recent issues authored by
+explicitly mapped Slack members. Numeric GitHub identities and current membership
+are required for author priority outside a member-owned namespace. A live isolated
+probe made four GET requests, found Daniel’s public issue in Stieges/bpmn-generator,
+and assigned verified author priority without changing the live queue or sending
+writes. Poll reservations, pagination, partial-result detection, provider limits,
+evidence expiry and credential-change recovery are tested. Optional source health
+is recorded without retroactively claiming it for older samples.
 
 ## Remaining release and validation work
 
-- Release issue discovery/reactions and verify the installed runtime, preserving
+- Release member-authored discovery and verify the installed runtime, preserving
   queue, policy, receipts, daily quota and accumulated health history.
 - Validate a real account-authorized follow when provider authentication and the
   pilot’s unchanged daily quota permit it.

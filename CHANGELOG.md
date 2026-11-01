@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.6 - 2026-11-01
+
+- Discover recent public issue posts authored by explicitly mapped Slack members,
+  including posts outside member-owned repositories. Verify numeric author IDs
+  and withdraw priority when membership or evidence expires.
+- Persist author scan pagination, reserved polls and provider cooldowns; surface
+  incomplete or capacity-limited searches without claiming full coverage.
+- Record optional GitHub-post source health without invalidating earlier history.
+
 ## 0.4.5 - 2026-11-01
 
 - Discover linked public GitHub issue indexes and issue posts from observed

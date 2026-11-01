@@ -25,6 +25,7 @@ import { runWorker, workerStatus, enqueue, saveState } from "../lib/worker.mjs"
 import { syncCommunityFeed } from "../lib/community-feed.mjs"
 import { assertWorkerRuntime } from "../lib/worker-lock.mjs"
 import { readHealthReport } from "../lib/health.mjs"
+import { syncGithubMemberPosts } from "../lib/github-member-posts.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -6639,9 +6640,11 @@ const main = async () => {
           }
         }
         enqueue(state, slackSeedTargets(snapshot), Date.now())
+        await syncGithubMemberPosts({state,snapshot,token:credential(directory,"github"),signal,checkpoint})
         prioritizeSlack(state, snapshot)
         state.priorityNextPollAt = token && snapshot ? Math.min(state.slackNextRefreshAt ?? Date.now(),
           snapshot.expiresAt > Date.now() ? state.slackHistory?.nextPollAt ?? Infinity : Infinity) : useCommunity ? state.communityFeed?.nextPollAt : undefined
+        state.priorityNextPollAt=Math.min(state.priorityNextPollAt??Infinity,state.githubMemberPosts?.nextPollAt??Infinity)
       }
       if (args[0] === "slack") {
         if (args[1] === "source") {
