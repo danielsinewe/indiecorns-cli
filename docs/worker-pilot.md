@@ -68,7 +68,8 @@ shared quota and atomic policy revocation. A live public issue-index scrape foun
 twenty post candidates. A real API preflight completed four read requests with its
 write intercepted before HTTP dispatch; no reaction was sent or recorded. Three
 checked community repositories had no issues, so no live issue was allowlisted.
-Local validation passes 91 tests and packaged startup verification.
+Issue listings refresh every fifteen minutes within the existing host budgets.
+Local validation passes 92 tests and packaged startup verification.
 
 ## Remaining release and validation work
 

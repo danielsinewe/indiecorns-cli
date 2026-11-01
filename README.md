@@ -334,6 +334,8 @@ tokens need Issues read/write permission. Clear a list with `--github-issue=`
 
 Observed repository pages can seed their linked public issue indexes and numeric
 issue posts, within the existing robots/host budgets and twenty-link page limits.
+Issue listings refresh every fifteen minutes; existing post observations keep
+their six-hour cooldown instead of being reset by rediscovery.
 Slack priority for a member-owned repository's issue means `verified_slack_project`;
 it does not claim that the member authored the post. Other platforms' post actions
 still produce local briefs rather than an external reaction.

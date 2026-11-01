@@ -4,7 +4,7 @@ import {githubIssue,parseGithubIssue,githubIssueReaction} from '../indiecorns/li
 import {defaultPolicy,validatePolicy,runActions} from '../indiecorns/lib/actions.mjs'
 import {extractPage,memberCandidates} from '../indiecorns/lib/scraper.mjs'
 import {prioritizeSlack} from '../indiecorns/lib/slack.mjs'
-import {enqueue} from '../indiecorns/lib/worker.mjs'
+import {enqueue,runWorker} from '../indiecorns/lib/worker.mjs'
 import {mkdtempSync,rmSync,statSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
@@ -70,6 +70,22 @@ test('a member-owned repository prioritizes its issue without claiming the membe
   assert.equal(s.jobs.post.priority,0)
   assert.equal(s.jobs.post.priorityReason,'verified_slack_project')
   assert.equal(s.jobs.post.slackEvidence.relationship,'member_project')
+})
+
+test('issue listings are searched again after fifteen minutes without resetting post observation cooldowns',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'indiecorns-issue-refresh-'));let clock=1000
+  const listing={platform:'github',eventType:'inspect',targetType:'listing',profileUrl:'https://github.com/maker/project/issues'}
+  const seen=[]
+  const options={directory,once:true,now:()=>clock,discover:async()=>[listing,target],
+    observe:async item=>{seen.push(item.profileUrl);return {status:'observed',observedAt:clock,contentHash:'page'}}}
+  try {
+    await runWorker(options)
+    clock+=900000
+    const next=await runWorker(options)
+    assert.equal(seen.filter(address=>address===listing.profileUrl).length,2)
+    assert.equal(seen.filter(address=>address===url).length,1)
+    assert.equal(Object.values(next.jobs).find(j=>j.target.profileUrl===listing.profileUrl).nextObserveAt,clock+900000)
+  }finally{rmSync(directory,{recursive:true,force:true})}
 })
 
 test('reaction verifies public repository, actor, exact issue, and independent after-write evidence',async()=>{

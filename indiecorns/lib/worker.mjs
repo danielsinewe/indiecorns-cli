@@ -146,7 +146,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
             health.progress('observe')
             job.observation = await observe(job.target, state.hosts, signal, () => {health.progress('observe');saveState(path, state)})
             job.observationFailures = 0
-            job.nextObserveAt = now() + 21600000
+            job.nextObserveAt = now() + (job.target.targetType==='listing'?900000:21600000)
             job.observationError = null
           } catch (error) {
             if (signal?.aborted) break
