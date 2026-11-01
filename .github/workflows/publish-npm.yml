@@ -40,4 +40,20 @@ jobs:
         run: npm pack --dry-run
 
       - name: Publish
-        run: npm publish --access public
+        env:
+          NPM_PUBLISH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # setup-node's placeholder auth line must not suppress OIDC discovery.
+          if publish_output=$(NPM_CONFIG_USERCONFIG=/dev/null NODE_AUTH_TOKEN= npm publish --registry https://registry.npmjs.org --access public 2>&1); then
+            printf '%s\n' "$publish_output"
+          else
+            publish_exit_code=$?
+            printf '%s\n' "$publish_output"
+            if [ -z "$NPM_PUBLISH_TOKEN" ]; then exit "$publish_exit_code"; fi
+            case "$publish_output" in
+              *"npm error code E404"*|*"npm error code E401"*|*"npm error code ENEEDAUTH"*)
+                NODE_AUTH_TOKEN="$NPM_PUBLISH_TOKEN" npm publish --registry https://registry.npmjs.org --access public
+                ;;
+              *) exit "$publish_exit_code" ;;
+            esac
+          fi
