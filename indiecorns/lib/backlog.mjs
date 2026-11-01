@@ -7,22 +7,42 @@ import { join } from 'node:path'
 const stores = new WeakMap()
 export function attachBacklog(state, directory, write) {
   state.backlog ??= {}
-  stores.set(state, { directory:join(directory, 'queue'), write })
+  const store={ directory:join(directory, 'queue'), write }
+  stores.set(state, store)
+  // Upgrade old indexes one payload at a time, without promoting all cold jobs.
+  // The next normal checkpoint commits this metadata alongside the queue.
+  for (const [key,entry] of Object.entries(state.backlog)) {
+    if (!entry.target) entry.target=priorityTarget(readPayload(store,key).target)
+  }
 }
 const payloadPath = (store, key) => {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid backlog key')
   return join(store.directory, key.slice(0, 2), `${key}.json`)
 }
-export function restoreJob(state, key) {
-  if (!state.backlog?.[key]) return
-  const store=stores.get(state)
-  if (!store) throw new Error('Backlog storage unavailable')
+const readPayload = (store,key) => {
   const job=JSON.parse(readFileSync(payloadPath(store,key),'utf8'))
   if (job.key!==key || !job.target) throw new Error('Invalid backlog payload')
+  return job
+}
+const priorityTarget = target => Object.fromEntries(
+  ['profileUrl','targetUrl','slackChannelId','sharedBySlackUserId'].flatMap(key=>
+    typeof target[key]==='string'?[[key,target[key]]]:[]))
+export function restoreJob(state, key) {
+  const entry=state.backlog?.[key]
+  if (!entry) return
+  const store=stores.get(state)
+  if (!store) throw new Error('Backlog storage unavailable')
+  const job=readPayload(store,key)
+  // Current membership can differ from the archived payload's old evidence.
+  for (const field of ['priority','priorityReason','slackEvidence']) {
+    if (Object.hasOwn(entry,field)) job[field]=entry[field]
+  }
+  if (Object.hasOwn(entry.target??{},'slackMember')) job.target.slackMember=entry.target.slackMember
   state.jobs[key]=job
   delete state.backlog[key]
 }
 const schedule = job => ({key:job.key, priority:job.priority, discoveredAt:job.discoveredAt,
+  target:priorityTarget(job.target),
   lastDiscoveredAt:job.lastDiscoveredAt ?? job.discoveredAt, observed:job.observation?.status==='observed',
   status:job.status, nextObserveAt:job.nextObserveAt ?? 0})
 export const dueOrder = (a,b) => a.priority-b.priority ||
