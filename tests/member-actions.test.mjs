@@ -22,9 +22,11 @@ const external=async(repository,{authorize})=>{assert.equal(authorize(),true);re
 test('member scope shares quotas, persists intent and reuses the same receipts as exact allowlists',async()=>{
  const s=state();let follows=0,stars=0,saved=false,actorReads=0
  const opts={...options(s),actorExternal:async()=>{actorReads++;return actorExternal()},checkpoint:()=>{saved=Object.values(s.actions).some(a=>a.status==='executing')||saved},
-  followExternal:async(...args)=>{assert.ok(saved);assert.equal(s.actionBudget.attempts,1);follows++;return followExternal(...args)},
+  followExternal:async(...args)=>{assert.ok(saved);assert.equal(s.actionBudget.attempts,1);assert.equal(Object.values(s.actions).find(a=>a.status==='executing').authorization.githubActorId,123);follows++;return followExternal(...args)},
   external:async(...args)=>{stars++;return external(...args)}}
  await runActions(opts);assert.equal(follows,1);assert.equal(stars,0);assert.equal(actorReads,1)
+ const receipt=Object.values(s.actions).find(a=>a.kind==='github_follow')
+ assert.deepEqual(receipt.authorization,{scope:'verified_slack_member',workspaceId:'TTEST',channelId:'CTEST',slackUserId:'UMEMBER',owner:'maker',observedAt:1000,expiresAt:86401000,githubActorId:123,accountRevision:binding,authorizedAt:1000})
  await runActions({...opts,state:JSON.parse(JSON.stringify(s))});assert.equal(follows,1);assert.equal(actorReads,1)
  const recovered=JSON.parse(JSON.stringify(s))
  await runActions({...opts,state:recovered,policy:{...policy,githubMemberActions:[],githubRepositories:['maker/project'],githubUsers:['maker']},now:()=>86401000,
@@ -133,6 +135,7 @@ test('real CLI worker passes refreshed community evidence into member actions an
   const saved=JSON.parse(fs.readFileSync(path.join(directory,'state.json'))),requests=fs.readFileSync(events,'utf8').trim().split('\n').map(v=>JSON.parse(v))
   assert.equal(saved.communityFeed.health,'ok');assert.equal(saved.slackMemberCount,1);assert.equal(saved.actionBudget.attempts,1)
   assert.equal(Object.values(saved.actions).filter(a=>a.kind==='github_follow'&&a.status==='completed').length,1)
+  assert.equal(Object.values(saved.actions).find(a=>a.kind==='github_follow').authorization.githubActorId,123)
   assert.equal(requests.filter(r=>r.method==='PUT').length,1)
   assert.equal(requests.filter(r=>r.path==='/user').length,1)
   assert.equal(fs.existsSync(path.join(directory,'worker.lock')),false)

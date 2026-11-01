@@ -335,6 +335,8 @@ scope. Existing policies enable no member-wide actions.
 Member-scoped actions share the account binding, daily budget, provider cooldown
 and permanent receipts with exact allowlists. Changing between scopes does not
 replay completed actions. Issue reactions still require an exact issue allowlist.
+Member-scoped intents and receipts retain the authorizing Slack identity,
+membership timestamps, account binding and numeric GitHub actor ID.
 Select one kind with `--github-member-actions follow` or `star`, and revoke the
 scope with `--github-member-actions=` and `--mode execute`. Exact repository,
 user and issue allowlists remain independent.

@@ -47,13 +47,15 @@ export function githubUser(target) {
 }
 // Only a fresh, complete roster and an explicit public profile mapping can
 // authorize member-wide actions. Queue priority and target attribution cannot.
-function memberOwns(snapshot,owner,at) {
+function memberEvidence(snapshot,owner,at) {
   if(snapshot?.version!==1||!/^T[A-Z0-9]+$/.test(snapshot.workspaceId??'')||! /^[CG][A-Z0-9]+$/.test(snapshot.channelId??'')||
     !Number.isFinite(snapshot.observedAt)||!Number.isFinite(snapshot.expiresAt)||snapshot.observedAt>at||snapshot.expiresAt<=at||
     snapshot.expiresAt<=snapshot.observedAt||snapshot.expiresAt-snapshot.observedAt>86400000||
-    !Array.isArray(snapshot.memberIds)||!Array.isArray(snapshot.identities))return false
-  return snapshot.identities.some(identity=>identity&&snapshot.memberIds.includes(identity.slackUserId)&&/^[UW][A-Z0-9]+$/.test(identity.slackUserId??'')&&
+    !Array.isArray(snapshot.memberIds)||!Array.isArray(snapshot.identities))return null
+  const identity=snapshot.identities.find(identity=>identity&&snapshot.memberIds.includes(identity.slackUserId)&&/^[UW][A-Z0-9]+$/.test(identity.slackUserId??'')&&
     Array.isArray(identity.profileUrls)&&identity.profileUrls.some(profileUrl=>githubUser({platform:'github',eventType:'inspect',profileUrl})===owner))
+  return identity?{scope:'verified_slack_member',workspaceId:snapshot.workspaceId,channelId:snapshot.channelId,
+    slackUserId:identity.slackUserId,owner,observedAt:snapshot.observedAt,expiresAt:snapshot.expiresAt}:null
 }
 export async function githubActor(options) {
   const {data}=await githubJson('/user',options)
@@ -117,7 +119,7 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
       const owner=repository?.split('/')[0]??username
       const kind=repository?'star':username?'follow':null
       const observationTarget={...job.target,profileUrl:job.observation.url}
-      if(kind&&policy.githubMemberActions.includes(kind)&&memberOwns(memberSnapshot,owner,now())&&
+      if(kind&&policy.githubMemberActions.includes(kind)&&memberEvidence(memberSnapshot,owner,now())&&
         (repository?githubRepository(observationTarget)===repository:githubUser(observationTarget)===username))
         action=repository?{kind:'github_star',subject:repository,field:'repository',execute:external,memberOwner:owner}
           :{kind:'github_follow',subject:username,field:'username',execute:followExternal,memberOwner:owner}
@@ -130,6 +132,7 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
     if (state.actionBudget?.day!==day) state.actionBudget={day,attempts:0}
     if (state.actionBudget.attempts>=policy.maxExternalPerDay) continue
     if (!token) {state.actionHealth='github_credential_required';continue}
+    let authorization
     if(action.memberOwner) {
       if(!accountRevision||policy.accountRevision!==accountRevision){state.actionHealth='account_policy_mismatch';continue}
       try {
@@ -142,24 +145,26 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
         break
       }
       // Recheck expiry after the actor read. Never auto-follow or auto-star self.
-      if(actor.username.toLowerCase()===action.memberOwner||!memberOwns(memberSnapshot,action.memberOwner,now()))continue
+      const membership=memberEvidence(memberSnapshot,action.memberOwner,now())
+      if(actor.username.toLowerCase()===action.memberOwner||!membership)continue
+      authorization={...membership,githubActorId:actor.id,accountRevision,authorizedAt:now()}
     }
     // Reserve quota and persist intent before writing. A restart rechecks remote
     // state before repeating this idempotent operation; it cannot replay a message.
     state.actionBudget.attempts++
-    state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'executing',startedAt:now()}
+    state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'executing',startedAt:now(),...(authorization?{authorization}:{})}
     checkpoint()
     try {
       const proof=await action.execute(action.subject,{token,signal,now,
-        ...(action.memberOwner?{authorize:()=>memberOwns(memberSnapshot,action.memberOwner,now())&&actor.username.toLowerCase()!==action.memberOwner}:{})})
+        ...(action.memberOwner?{authorize:()=>Boolean(memberEvidence(memberSnapshot,action.memberOwner,now()))&&actor.username.toLowerCase()!==action.memberOwner}:{})})
       if (proof?.verified!==true || proof[action.field]!==action.subject || proof.kind!==action.kind) throw new Error('Unverified action result')
       if(action.kind==='github_issue_reaction' && (proof.content!=='+1'||!Number.isSafeInteger(proof.actorId)||proof.actorId<1||!Number.isSafeInteger(proof.reactionId)||proof.reactionId<1))throw new Error('Unverified reaction receipt')
-      state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'completed',completedAt:now(),proof}
+      state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'completed',completedAt:now(),proof,...(authorization?{authorization}:{})}
       state.actionHealth=null
     } catch (error) {
       const retryAt=now()+Math.max(3600000,error.retryAfterMs ?? 0)
       if (error.retryAfterMs) state.externalNextAttemptAt=retryAt
-      state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'unverified',retryAt}
+      state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'unverified',retryAt,...(authorization?{authorization}:{})}
       state.actionHealth=error.code==='GITHUB_PERMISSION_REQUIRED'?'github_permission_required':error.code==='MEMBER_SCOPE_EXPIRED'?'member_scope_expired':'external_action_unverified'
     }
     checkpoint()
