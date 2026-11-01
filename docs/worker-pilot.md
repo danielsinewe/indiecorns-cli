@@ -76,3 +76,13 @@ At this inspection the live pilot has 41 targets and 35 local briefs. The code
 has 48 passing local tests. Windows startup/recovery/cleanup passed in CI run
 41321015554 at commit 46c37f8. Remaining release and scale work is still open;
 this is not a claim that every platform can execute engagement actions.
+
+The background installer now avoids disposable npm execution-cache paths. It
+verifies and installs an exact published CLI release into a private versioned
+runtime when invoked from `npx`, while reusing global installs and checkouts.
+Registration stores the real executable paths for later uninstall, and cleanup
+retains the active release plus one rollback release. A real packaged npm install
+was exercised in an isolated temporary home: after deleting the execution cache,
+the permanent packaged CLI still imported its dependencies and returned the clean
+worker status. All temporary test files were removed. This package-level check
+is also part of three-OS CI; public-registry release verification is still pending.

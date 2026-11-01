@@ -41,6 +41,9 @@ jobs:
       - name: Verify package contents
         run: npm run pack:check
 
+      - name: Verify permanent packaged runtime after cache removal
+        run: npm run runtime:verify
+
       - name: Verify Linux worker supervision
         if: runner.os == 'Linux'
         shell: bash

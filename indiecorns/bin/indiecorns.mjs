@@ -19,6 +19,7 @@ import { validateSlackEvidence, slackSeedTargets, prioritizeSlack, refreshSlackE
 import { defaultPolicy, validatePolicy, runActions } from "../lib/actions.mjs"
 import { discoverCommunity } from "../lib/discovery.mjs"
 import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
+import { prepareServiceRuntime, pruneManagedRuntimes } from "../lib/runtime.mjs"
 import { manageService } from "../lib/service.mjs"
 import { runWorker, workerStatus, enqueue, saveState } from "../lib/worker.mjs"
 
@@ -6673,10 +6674,24 @@ const main = async () => {
         return 0
       }
       if (["install", "uninstall", "service-status"].includes(args[0])) {
-        printJson(manageService(args[0], {
-          cli: fileURLToPath(import.meta.url),
+        const registrationPath = join(directory, "service-runtime.json")
+        const registration = existsSync(registrationPath) ? JSON.parse(readFileSync(registrationPath,"utf8")) : null
+        const runtime = args[0] === "install" ? prepareServiceRuntime({cli:fileURLToPath(import.meta.url)}) : {cli:registration?.cli ?? fileURLToPath(import.meta.url)}
+        const result = manageService(args[0], {
+          cli: runtime.cli,
+          node: args[0] === "install" ? process.execPath : registration?.node ?? process.execPath,
           interval: Number(flags["interval-seconds"] ?? 300),
-        }))
+        })
+        if (args[0] === "install") {
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(registrationPath,{cli:runtime.cli,node:process.execPath,managed:runtime.managed,runtimeDirectory:runtime.directory,registeredAt:Date.now()})
+          if(runtime.managed) {
+            try { pruneManagedRuntimes({active:runtime.directory,previous:registration?.runtimeDirectory}) }
+            catch { result.runtimeCleanup = "deferred" }
+          }
+        }
+        if (args[0] === "uninstall") rmSync(registrationPath,{force:true})
+        printJson(result)
         return 0
       }
       if (args[0] === "status") {

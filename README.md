@@ -250,7 +250,14 @@ limit, a hidden parent that restarts a failed worker after 30 seconds, a one-min
 parent failure restart, and a five-minute recurring recovery trigger.
 A hidden PowerShell launcher keeps the worker in the background. Services discard
 stdout/stderr to prevent unbounded logs; inspect `worker status` for persisted
-health. Reinstall after moving the CLI or Node executable.
+health. An install started through `npx` prepares a private permanent runtime in
+`~/.indiecorns/runtime`, verifies the installed release against the invoking CLI,
+and registers that stable path. Removing npm's execution cache then leaves the
+service operational. Existing global installations and checkouts are reused.
+Successful managed updates retain the active release and one rollback release.
+Service registration records the actual CLI/Node paths so uninstall can stop a
+managed worker even when invoked from a different temporary cache. Reinstall
+after moving a reused global checkout or the Node executable.
 No API key or paid model is required for polling. Sign in using `indiecorns login`
 first; missing or expired authentication is recorded as `auth_required`.
 

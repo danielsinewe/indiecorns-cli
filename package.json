@@ -45,7 +45,8 @@
 		"cli": "node ./indiecorns/bin/indiecorns.mjs",
 		"smoke": "node ./indiecorns/bin/indiecorns.mjs help --no-telemetry",
 		"pack:check": "npm pack --dry-run",
-		"test": "node --test tests/*.test.mjs && npm run smoke && npm run pack:check"
+		"test": "node --test tests/*.test.mjs && npm run smoke && npm run pack:check",
+		"runtime:verify": "node scripts/verify-runtime.mjs"
 	},
 	"packageManager": "npm@12.0.1",
 	"dependencies": {
