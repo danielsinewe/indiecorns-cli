@@ -21,18 +21,11 @@ const query=`query IndiecornsFollowState($username: String!) {
 const mutation=`mutation IndiecornsFollow($input: UserFollowInput!) {
   userFollow(input: $input) { clientMutationId errors { field } node { id username url isFollowing isViewer } }
 }`
-// Documented userFollow mutation; app approval and public/private/write scopes
-// are provider requirements. No upvote, comment or undocumented endpoint.
-// https://api-v2-docs.producthunt.com/mutation/userfollow/
-export async function producthuntFollow(username,{token,signal,request=fetch,now=Date.now}={}) {
-  if(!validProducthuntUsername(username))throw new Error('Invalid Product Hunt username')
-  username=username.toLowerCase()
+async function producthuntGraphql(query,variables,{token,signal,request=fetch,now=Date.now}) {
   if(!token)throw Object.assign(new Error('Product Hunt credential required'),{code:'CREDENTIAL_REQUIRED'})
-  const operationSignal=AbortSignal.any([signal??new AbortController().signal,AbortSignal.timeout(90000)])
-  const call=async(query,variables)=>{
     const response=await request('https://api.producthunt.com/v2/api/graphql',{method:'POST',redirect:'error',
       headers:{Authorization:`Bearer ${token}`,Accept:'application/json','Content-Type':'application/json'},
-      body:JSON.stringify({query,variables}),signal:AbortSignal.any([operationSignal,AbortSignal.timeout(30000)])})
+      body:JSON.stringify({query,variables}),signal:AbortSignal.any([signal??new AbortController().signal,AbortSignal.timeout(30000)])})
     if(response.status===429||response.status===503) {
       const retryAfterMs=retryDelay(response.headers.get('retry-after'),now())
       await response.body?.cancel()
@@ -48,7 +41,16 @@ export async function producthuntFollow(username,{token,signal,request=fetch,now
     }
     if(!body?.data||typeof body.data!=='object')throw unavailable()
     return body.data
-  }
+}
+// Documented userFollow mutation; app approval and public/private/write scopes
+// are provider requirements. No upvote, comment or undocumented endpoint.
+// https://api-v2-docs.producthunt.com/mutation/userfollow/
+export async function producthuntFollow(username,{token,signal,request=fetch,now=Date.now}={}) {
+  if(!validProducthuntUsername(username))throw new Error('Invalid Product Hunt username')
+  username=username.toLowerCase()
+  if(!token)throw Object.assign(new Error('Product Hunt credential required'),{code:'CREDENTIAL_REQUIRED'})
+  const operationSignal=AbortSignal.any([signal??new AbortController().signal,AbortSignal.timeout(90000)])
+  const call=(query,variables)=>producthuntGraphql(query,variables,{token,signal:operationSignal,request,now})
   const target=user=>validProducthuntId(user?.id)&&user.username?.toLowerCase()===username&&
     producthuntUser({platform:'producthunt',eventType:'follow',profileUrl:user.url})===username&&
     typeof user.isFollowing==='boolean'&&user.isViewer===false
@@ -68,4 +70,31 @@ export async function producthuntFollow(username,{token,signal,request=fetch,now
   if(after.actor.id!==actorId||after.actor.username.toLowerCase()!==before.actor.username.toLowerCase()||
     after.user.id!==targetId||!after.user.isFollowing)throw unavailable()
   return {...proof,alreadyPresent:false}
+}
+
+// Read the documented public profile through the API when HTML is unavailable.
+export async function observeProducthuntProfile({target,token,state,checkpoint=()=>{},signal,request=fetch,now=Date.now}) {
+  const username=producthuntUser(target)
+  if(!username)throw new Error('Invalid Product Hunt profile target')
+  const blockedUntil=state?.providerNextAttemptAt?.producthunt??0
+  if(blockedUntil>now())throw Object.assign(new Error('Product Hunt cooldown'),{code:'HOST_DELAY',retryAt:blockedUntil})
+  let data
+  try {
+    data=await producthuntGraphql(`query IndiecornsProfile($username: String!) { user(username: $username) { id username url name headline } }`,{username},{token,signal,request,now})
+  } catch(error) {
+    if(error.retryAfterMs) {
+      error.retryAt=now()+error.retryAfterMs
+      if(state){state.providerNextAttemptAt??={};state.providerNextAttemptAt.producthunt=error.retryAt;checkpoint()}
+    }
+    throw error
+  }
+  const user=data.user
+  if(!validProducthuntId(user?.id)||user.username?.toLowerCase()!==username||
+    producthuntUser({platform:'producthunt',eventType:'inspect',profileUrl:user.url})!==username||typeof user.name!=='string'||
+    (user.headline!==null&&typeof user.headline!=='string'))throw unavailable()
+  const compact=(text,max)=>String(text??'').replace(/\s+/g,' ').trim().slice(0,max)
+  const metadata={id:user.id,username,url:user.url,title:compact(user.name,300),description:compact(user.headline,1600)}
+  return {status:'observed',url:user.url,observedAt:now(),title:metadata.title,description:metadata.description,
+    type:'profile',source:'producthunt_api',providerUserId:user.id,links:[],codeLinks:[],issueLinks:[],
+    contentHash:createHash('sha256').update(JSON.stringify(metadata)).digest('hex')}
 }

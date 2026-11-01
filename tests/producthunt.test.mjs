@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {fileURLToPath,pathToFileURL} from 'node:url'
 import {execFileSync,spawnSync} from 'node:child_process'
-import {producthuntUser,producthuntFollow} from '../indiecorns/lib/producthunt.mjs'
+import {producthuntUser,producthuntFollow,observeProducthuntProfile} from '../indiecorns/lib/producthunt.mjs'
 import {defaultPolicy,validatePolicy,runActions} from '../indiecorns/lib/actions.mjs'
 import {credential,storeCredential} from '../indiecorns/lib/credentials.mjs'
 import {targetKey} from '../indiecorns/lib/worker.mjs'
@@ -18,7 +18,7 @@ function transport({following=false,change}={}){const calls=[];return{calls,requ
  if(mutating){following=true;return Response.json({data:{userFollow:{clientMutationId:body.variables.input.clientMutationId,errors:[],node:{...user,isFollowing:true}}}})}
  return Response.json(queryData(actor,{...user,isFollowing:following}))
 }}}
-const job=(key,platform,url,priority=0)=>({key,priority,discoveredAt:1000,target:{platform,eventType:'follow',profileUrl:url},observation:{status:'observed',url,contentHash:key,observedAt:1000}})
+const job=(key,platform,url,priority=0)=>({key,status:'queued',priority,discoveredAt:1000,target:{platform,eventType:'follow',profileUrl:url},observation:{status:'observed',url,contentHash:key,observedAt:1000}})
 const state=()=>({jobs:{ph:job('ph','producthunt',user.url)}})
 const binding='a'.repeat(64),policy={...defaultPolicy,mode:'execute',accountRevision:binding,maxExternalPerDay:1,producthuntUsers:['maker']}
 const options=s=>({state:s,policy,accountRevision:binding,producthuntToken:'ph-secret',token:'github-secret',now:()=>1000})
@@ -124,11 +124,29 @@ test('real CLI passes the stored Product Hunt credential into its worker and doe
  const home=fs.mkdtempSync(path.join(os.tmpdir(),'indiecorns-ph-worker-')),directory=path.join(home,'.indiecorns/worker'),events=path.join(home,'events.jsonl'),stub=path.join(home,'fetch.mjs')
  const cli=fileURLToPath(new URL('../indiecorns/bin/indiecorns.mjs',import.meta.url)),env={...process.env,HOME:home,USERPROFILE:home,INDIECORNS_TOKEN:'community-test',INDIECORNS_GITHUB_TOKEN:'',INDIECORNS_SLACK_TOKEN:'',INDIECORNS_PRODUCTHUNT_TOKEN:'',INDIECORNS_TELEMETRY_DISABLED:'1'}
  try{
-  storeCredential(directory,'producthunt','ph-secret');const now=Date.now(),s=state(),j=s.jobs.ph;j.key=targetKey(j.target);j.nextObserveAt=now+3600000;j.observation.observedAt=now;j.observation.links=[];j.observation.codeLinks=[];j.observation.issueLinks=[];s.jobs={[j.key]:j};s.version=1;s.failures=0;s.nextPollAt=0;fs.writeFileSync(path.join(directory,'state.json'),JSON.stringify(s))
+  storeCredential(directory,'producthunt','ph-secret');const now=Date.now(),s=state(),j=s.jobs.ph;j.key=targetKey(j.target);j.discoveredAt=now;j.lastDiscoveredAt=now;j.nextObserveAt=0;j.observation.status='http_unavailable';j.observation.observedAt=now;j.observation.links=[];j.observation.codeLinks=[];j.observation.issueLinks=[];s.jobs={[j.key]:j};s.version=1;s.failures=0;s.nextPollAt=0;fs.writeFileSync(path.join(directory,'state.json'),JSON.stringify(s))
   const snapshot={version:1,workspaceId:'TTEST',channelId:'CTEST',observedAt:now-1,expiresAt:now+3600000,memberIds:['UMEMBER'],identities:[]}
-  fs.writeFileSync(stub,String.raw`import fs from 'node:fs';let following=false;globalThis.fetch=async(input,options={})=>{const u=new URL(input);if(u.host==='app.indiecorns.com'&&u.pathname.endsWith('/worker-feed'))return Response.json({version:1,snapshot:${JSON.stringify(snapshot)},targets:[],cursor:'',latest:'0.000000'});if(u.host==='app.indiecorns.com'&&u.pathname.endsWith('/community-targets'))return Response.json({targets:[],pagination:{hasMore:false,nextCursor:null}});if(u.host==='api.producthunt.com'&&u.pathname==='/v2/api/graphql'){if(options.headers.Authorization!=='Bearer ph-secret')throw new Error('Wrong provider credential');const b=JSON.parse(options.body),mutating=b.query.startsWith('mutation ');fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({mutating})+'\n');if(mutating){following=true;return Response.json({data:{userFollow:{clientMutationId:b.variables.input.clientMutationId,errors:[],node:{...${JSON.stringify(user)},isFollowing:true}}}})}return Response.json({data:{viewer:{user:${JSON.stringify(actor)}},user:{...${JSON.stringify(user)},isFollowing:following}}});}throw new Error('Unexpected test request');};`)
+  fs.writeFileSync(stub,String.raw`import fs from 'node:fs';let following=false;globalThis.fetch=async(input,options={})=>{const u=new URL(input);if(u.host==='app.indiecorns.com'&&u.pathname.endsWith('/worker-feed'))return Response.json({version:1,snapshot:${JSON.stringify(snapshot)},targets:[],cursor:'',latest:'0.000000'});if(u.host==='app.indiecorns.com'&&u.pathname.endsWith('/community-targets'))return Response.json({targets:[],pagination:{hasMore:false,nextCursor:null}});if(u.host==='api.producthunt.com'&&u.pathname==='/v2/api/graphql'){if(options.headers.Authorization!=='Bearer ph-secret')throw new Error('Wrong provider credential');const b=JSON.parse(options.body),mutating=b.query.startsWith('mutation ');fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({mutating})+'\n');if(b.query.startsWith('query IndiecornsProfile'))return Response.json({data:{user:{...${JSON.stringify(user)},name:'Maker',headline:'Builds apps',email:'not-requested-or-stored'}}});if(mutating){following=true;return Response.json({data:{userFollow:{clientMutationId:b.variables.input.clientMutationId,errors:[],node:{...${JSON.stringify(user)},isFollowing:true}}}})}return Response.json({data:{viewer:{user:${JSON.stringify(actor)}},user:{...${JSON.stringify(user)},isFollowing:following}}});}throw new Error('Unexpected test request');};`)
   execFileSync(process.execPath,[cli,'worker','policy','--mode','execute','--producthunt-user','maker','--max-external-per-day','1','--no-telemetry'],{env,encoding:'utf8'})
   const run=()=>execFileSync(process.execPath,['--import',pathToFileURL(stub).href,cli,'worker','run','--once','--no-telemetry'],{env,encoding:'utf8',timeout:30000,stdio:['ignore','pipe','pipe']});run();run()
-  const saved=JSON.parse(fs.readFileSync(path.join(directory,'state.json'))),calls=fs.readFileSync(events,'utf8').trim().split('\n').map(v=>JSON.parse(v));assert.equal(saved.actionBudget.attempts,1);assert.equal(calls.filter(c=>c.mutating).length,1);assert.equal(Object.values(saved.actions).find(a=>a.kind==='producthunt_follow').status,'completed');assert.equal(fs.existsSync(path.join(directory,'worker.lock')),false)
+  const saved=JSON.parse(fs.readFileSync(path.join(directory,'state.json'))),calls=fs.readFileSync(events,'utf8').trim().split('\n').map(v=>JSON.parse(v));assert.equal(saved.actionBudget.attempts,1);assert.equal(saved.jobs[j.key].observation.source,'producthunt_api');assert.equal(calls.filter(c=>c.mutating).length,1);assert.equal(Object.values(saved.actions).find(a=>a.kind==='producthunt_follow').status,'completed');assert.equal(fs.existsSync(path.join(directory,'worker.lock')),false)
  }finally{fs.rmSync(home,{recursive:true,force:true})}
+})
+
+test('official API profile observation verifies exact identity and stores only bounded public metadata',async()=>{
+ const target={platform:'producthunt',eventType:'follow',profileUrl:user.url}
+ const request=async(url,options)=>{assert.equal(url,'https://api.producthunt.com/v2/api/graphql');assert.equal(options.redirect,'error');assert.match(JSON.parse(options.body).query,/query IndiecornsProfile/);return Response.json({data:{user:{...user,name:'Maker',headline:'x'.repeat(2000),email:'PRIVATE_SENTINEL',media:'PRIVATE_SENTINEL'}}})}
+ const observed=await observeProducthuntProfile({target,token:'ph-secret',request,now:()=>1000})
+ assert.equal(observed.status,'observed');assert.equal(observed.source,'producthunt_api');assert.equal(observed.providerUserId,'20');assert.equal(observed.description.length,1600);assert.equal(observed.observedAt,1000);assert.match(observed.contentHash,/^[a-f0-9]{64}$/);assert.doesNotMatch(JSON.stringify(observed),/PRIVATE_SENTINEL/)
+ for(const value of [{...user,id:''},{...user,username:'other'},{...user,url:'https://evil.example/@maker'}])await assert.rejects(observeProducthuntProfile({target,token:'ph-secret',request:async()=>Response.json({data:{user:{name:'Maker',headline:null,...value}}})}))
+})
+
+test('observation rate limits are checkpointed and shared with actions before another API request',async()=>{
+ const target={platform:'producthunt',eventType:'follow',profileUrl:user.url},state={};let calls=0,saved=0
+ const options={target,token:'ph-secret',state,now:()=>1000,checkpoint:()=>{saved++},request:async()=>{calls++;return new Response('',{status:429,headers:{'retry-after':'7200'}})}}
+ await assert.rejects(observeProducthuntProfile(options),e=>e.retryAt===7201000)
+ assert.equal(saved,1);assert.equal(state.providerNextAttemptAt.producthunt,7201000)
+ await assert.rejects(observeProducthuntProfile(options),e=>e.code==='HOST_DELAY'&&e.retryAt===7201000);assert.equal(calls,1)
+ const s={...state,jobs:{ph:job('ph','producthunt',user.url)}};let mutations=0
+ await runActions({...options,state:s,policy,accountRevision:binding,producthuntToken:'ph-secret',producthuntExternal:async()=>{mutations++;return proof}});assert.equal(mutations,0)
 })

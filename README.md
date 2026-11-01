@@ -409,6 +409,13 @@ GitHub and Product Hunt share the daily cap and Slack-prioritized queue, while
 provider cooldowns remain independent. Responses are bounded and each follow has
 a 90-second deadline. No upvote, rating or comment executor is included.
 
+With a configured credential, profile observations use the documented API's
+public name, headline and identity fields instead of relying on HTML availability.
+The API URL and username must match the queued profile. No email or media is
+requested or stored. API observation rate limits are checkpointed and also pause
+Product Hunt actions, without pausing GitHub. Profiles retain the worker's normal
+six-hour observation interval.
+
 `INDIECORNS_PRODUCTHUNT_TOKEN` is the optional environment credential; the stdin
 command stores it privately for supervised services. Missing credentials or
 permissions remain explicit failures. Product Hunt live authentication and a real

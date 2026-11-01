@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process"
 import { credential, storeCredential } from "../lib/credentials.mjs"
 import { validateSlackEvidence, slackSeedTargets, prioritizeSlack, refreshSlackEvidence, discoverSlackShared } from "../lib/slack.mjs"
 import { defaultPolicy, validatePolicy, runActions } from "../lib/actions.mjs"
+import { producthuntUser, observeProducthuntProfile } from "../lib/producthunt.mjs"
 import { discoverCommunity } from "../lib/discovery.mjs"
 import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
 import { prepareServiceRuntime, pruneManagedRuntimes } from "../lib/runtime.mjs"
@@ -6593,12 +6594,14 @@ const main = async () => {
       const slackPath = join(directory, "slack-evidence.json")
       const slackSettingsPath = join(directory, "slack-settings.json")
       let memberSnapshot = null
+      let activeWorkerState = null
       const slackMode = () => {
         const mode = existsSync(slackSettingsPath) ? JSON.parse(readFileSync(slackSettingsPath,"utf8")).source : "auto"
         if (!["auto","community","local"].includes(mode)) throw new Error("Invalid Slack source")
         return mode
       }
       const updateSlack = async (state, signal, checkpoint) => {
+        activeWorkerState = state
         memberSnapshot = null
         let snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath, "utf8"))) : null
         const mode = slackMode()
@@ -6773,7 +6776,12 @@ const main = async () => {
             endpoint: getCliEndpoint("/api/public/cli/community-targets", "/api/community/action-targets"),
             headers: getCliAuthHeaders(), signal,progress,onPage,
           }),
-          observe: (target, hosts, signal, checkpoint) => scrapeTarget({ target, hosts, signal, checkpoint }),
+          observe: (target, hosts, signal, checkpoint) => {
+            const producthuntToken = credential(directory,"producthunt")
+            return producthuntUser(target) && producthuntToken
+              ? observeProducthuntProfile({target,token:producthuntToken,state:activeWorkerState,signal,checkpoint})
+              : scrapeTarget({ target, hosts, signal, checkpoint })
+          },
           prioritize: updateSlack,
           deriveTargets: memberCandidates,
           derivationRevision: "member-profile-repos-v3-issues",

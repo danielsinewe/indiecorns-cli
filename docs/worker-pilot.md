@@ -103,6 +103,10 @@ daily action budget and independent provider cooldowns. There is no configured
 Product Hunt credential or verified live follow. Provider approval and user-level
 write scopes are required. A read-only check of all eight Slack profiles found no
 structured public social links, so no additional identity mappings were inferred.
+Both queued Product Hunt profiles are unavailable to the public HTML scraper.
+Configured credentials now enable official API profile observation before action
+work, with persisted provider cooldowns; this path is covered by a real CLI test
+using a closed mock transport, not by a verified live Product Hunt session.
 
 ## Remaining release and validation work
 
