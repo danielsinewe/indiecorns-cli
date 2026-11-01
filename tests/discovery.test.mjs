@@ -33,3 +33,15 @@ test('API redirects, malformed bodies and oversized responses do not become empt
   await assert.rejects(discoverCommunity({ appUrl:'https://app.indiecorns.com', endpoint:'/targets', headers:{}, request:async () => Response.json({}) }), /response/)
   assert.equal(retryDelay(new Date(200000).toUTCString(), 100000), 100000)
 })
+
+test('a full API page remains useful but cannot claim complete discovery without pagination metadata',async()=>{
+  let calls=0
+  const result=await discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async()=>{},
+    request:async()=>Response.json({targets:Array.from({length:++calls===1?200:1},(_,index)=>({profileUrl:`https://peerlist.io/maker${index}`}))})})
+  assert.equal(calls,13)
+  assert.equal(result.targets.length,212)
+  assert.equal(result.partial,true)
+  assert.equal(result.sources[0].status,'capacity_limited')
+  assert.equal(result.sources[0].atCapacity,true)
+  assert.equal(result.sources[1].status,'ok')
+})

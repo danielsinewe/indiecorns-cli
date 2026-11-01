@@ -55,7 +55,9 @@ export async function discoverCommunity({ appUrl, endpoint, headers, signal, req
     const body = JSON.parse(await boundedText(response))
     if (!Array.isArray(body.targets)) throw new Error('Invalid discovery response')
     targets.push(...body.targets.map(target => ({ ...target, targetSource: source.targetSource })))
-    sources.push({ ...source, status: 'ok', count: body.targets.length, atCapacity: body.targets.length === 200 })
+    // The current API exposes no cursor or total. A full page is therefore not
+    // proof that discovery is complete; preserve its targets but report the gap.
+    sources.push({ ...source, status: body.targets.length >= 200 ? 'capacity_limited' : 'ok', count: body.targets.length, atCapacity: body.targets.length >= 200 })
   }
   return { targets, sources, partial: sources.some(source => source.status !== 'ok') }
 }
