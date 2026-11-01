@@ -102,6 +102,20 @@ test('provider search ceilings remain explicit and do not claim all matching pos
   assert.equal(author.page,1)
 })
 
+test('a shrinking search restarts from page one instead of remaining stuck past its final page',async()=>{
+  const state={jobs:{}},first=fixture({items:Array.from({length:100},(_,i)=>post(i+1)),total:101})
+  await syncGithubMemberPosts({state,snapshot:snapshot(),token:'secret',now:()=>NOW,request:first.request})
+  const shrunk=fixture({items:[],total:1})
+  await syncGithubMemberPosts({state,snapshot:snapshot(),token:'secret',now:()=>NOW+6000,request:shrunk.request})
+  assert.equal(state.githubMemberPosts.health,'paging')
+  assert.equal(Object.values(state.githubMemberPosts.authors)[0].page,1)
+  const refreshed=fixture({items:[post(999)]})
+  await syncGithubMemberPosts({state,snapshot:snapshot(),token:'secret',now:()=>NOW+12000,request:refreshed.request})
+  assert.equal(refreshed.requests[0].searchParams.get('page'),'1')
+  assert.equal(state.githubMemberPosts.health,'ok')
+  assert.equal(Object.keys(state.jobs).length,101)
+})
+
 test('missing credentials make no requests and a new credential retries without bypassing provider cooldowns',async()=>{
   const state={jobs:{}},api=fixture()
   await syncGithubMemberPosts({state,snapshot:snapshot(),token:null,now:()=>NOW,request:api.request})

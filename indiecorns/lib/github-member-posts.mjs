@@ -76,10 +76,12 @@ export async function syncGithubMemberPosts({state,snapshot,token,signal,checkpo
           observedAt:now(),expiresAt:Math.min(snapshot.expiresAt,author.identity.expiresAt,now()+6*HOUR)}}
       })
       const digest=createHash('sha256').update(JSON.stringify(staged.map(p=>p.id))).digest('hex')
-      if(author.page>1&&author.pages?.includes(digest))throw new Error('Repeated GitHub search page')
+      const restart=author.page>1&&data.total_count<=(author.page-1)*100
+      if(!restart&&author.page>1&&author.pages?.includes(digest))throw new Error('Repeated GitHub search page')
       enqueue(state,staged.map(p=>p.target),now())
       for(const post of staged)cache.proofs[post.id]=post.proof
-      if(data.incomplete_results){author.health='incomplete_results';author.nextPollAt=now()+300000}
+      if(restart){author.health='paging';author.page=1;author.since=null;author.pages=[];author.nextPollAt=now()+5000}
+      else if(data.incomplete_results){author.health='incomplete_results';author.nextPollAt=now()+300000}
       else if(data.total_count>author.page*100){
         if(data.items.length!==100)throw new Error('GitHub search pagination incomplete')
         if(author.page>=10){author.health='capacity_limited';author.page=1;author.since=null;author.pages=[];author.nextPollAt=now()+900000}
