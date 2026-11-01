@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { posix, dirname } from 'node:path'
 import { homedir, platform } from 'node:os'
 import { spawnSync } from 'node:child_process'
 const label = 'com.indiecorns.worker'
@@ -10,7 +10,7 @@ export function serviceDefinition({ system = platform(), home = homedir(), node 
   if ([home, node, cli].some(value => /[\n\r\0]/.test(value))) throw new Error('Invalid service path')
   const args = [node, cli, 'worker', 'run', '--interval-seconds', String(interval), '--no-telemetry']
   if (system === 'darwin') return {
-    path: join(home, 'Library', 'LaunchAgents', `${label}.plist`),
+    path: posix.join(home, 'Library', 'LaunchAgents', `${label}.plist`),
     content: `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -25,7 +25,7 @@ export function serviceDefinition({ system = platform(), home = homedir(), node 
 </dict></plist>`,
   }
   if (system === 'linux') return {
-    path: join(home, '.config', 'systemd', 'user', 'indiecorns-worker.service'),
+    path: posix.join(home, '.config', 'systemd', 'user', 'indiecorns-worker.service'),
     content: `[Unit]\nDescription=Indiecorns community worker\nAfter=network-online.target\n\n[Service]\nExecStart=${args.map(unitQuote).join(' ')}\nRestart=always\nRestartSec=30\nEnvironment=${unitQuote(`HOME=${home}`)}\nStandardOutput=null\nStandardError=null\n\n[Install]\nWantedBy=default.target\n`,
   }
   throw new Error('Worker service installation supports macOS and Linux; use worker run on other systems')

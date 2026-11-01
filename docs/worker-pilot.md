@@ -38,4 +38,4 @@ An opt-in GitHub-star adapter now reserves quota before execution and verifies
 remote state before/after idempotent writes. It has passed mocked API and replay
 tests; the live pilot has made no external engagement writes. Default actions
 only create local evidence briefs. CI now runs the full suite on macOS, Linux
-and Windows and attempts real Linux systemd supervision on its Linux runner.
+and Windows and has verified real Linux systemd supervision on its Linux runner.
