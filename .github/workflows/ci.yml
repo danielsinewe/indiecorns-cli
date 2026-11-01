@@ -82,6 +82,15 @@ jobs:
             if ($replacementWorkerPid -eq $originalWorkerPid) { throw "Task Scheduler did not restart the worker" }
             Get-Process -Id $replacementWorkerPid -ErrorAction Stop | Out-Null
             node indiecorns/bin/indiecorns.mjs worker service-status --no-telemetry
+          } catch {
+            $workerTaskName = 'IndiecornsWorker-' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $workerTask = Get-ScheduledTask -TaskName $workerTaskName -ErrorAction SilentlyContinue
+            if ($workerTask) {
+              $workerTask | Select-Object TaskName, State | Format-List
+              Get-ScheduledTaskInfo -TaskName $workerTaskName | Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List
+            }
+            Get-Process node, powershell -ErrorAction SilentlyContinue | Select-Object Id, ProcessName | Format-Table
+            throw
           } finally {
             node indiecorns/bin/indiecorns.mjs worker uninstall --no-telemetry
           }

@@ -38,9 +38,9 @@ export function serviceDefinition({ system = platform(), home = homedir(), node 
     const argumentsText = ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-File', launcherPath].map(windowsQuote).join(' ')
     return {
       path: win32.join(home, '.indiecorns', 'worker', 'worker-task.xml'), taskName, launcherPath,
-      // Start-Process receives a literal executable and a prequoted argument string;
+      // ProcessStartInfo receives a literal executable and prequoted arguments;
       // page content and credentials never enter the generated launcher.
-      launcherContent: '\uFEFF' + `$ErrorActionPreference = 'Stop'\n$worker = Start-Process -FilePath ${psQuote(node)} -ArgumentList ${psQuote(args.slice(1).map(windowsQuote).join(' '))} -WindowStyle Hidden -Wait -PassThru\nexit $worker.ExitCode\n`,
+      launcherContent: '\uFEFF' + `$ErrorActionPreference = 'Stop'\n$startInfo = New-Object System.Diagnostics.ProcessStartInfo\n$startInfo.FileName = ${psQuote(node)}\n$startInfo.Arguments = ${psQuote(args.slice(1).map(windowsQuote).join(' '))}\n$startInfo.UseShellExecute = $false\n$startInfo.CreateNoWindow = $true\n$worker = New-Object System.Diagnostics.Process\n$worker.StartInfo = $startInfo\nif (-not $worker.Start()) { throw 'Cannot start Indiecorns worker' }\n$worker.WaitForExit()\n$workerExitCode = $worker.ExitCode\n$worker.Dispose()\nif ($workerExitCode -eq 0) { exit 0 } else { exit 1 }\n`,
       content: `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
 <RegistrationInfo><Description>Indiecorns community worker</Description></RegistrationInfo>
