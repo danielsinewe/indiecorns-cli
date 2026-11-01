@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3 - 2026-11-01
+
+- Add opt-in GitHub member follows with an exact user allowlist and verified
+  before/after API receipts. Follows and stars share one daily action budget,
+  provider cooldown and Slack-prioritized scheduling.
+- Preserve completed follow receipts across restarts and report missing provider
+  permissions without claiming success. Existing policies permit no follows.
+
 ## 0.4.2 - 2026-11-01
 
 - Apply fresh Slack membership to archived jobs before selecting observations,

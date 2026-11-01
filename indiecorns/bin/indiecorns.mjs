@@ -123,6 +123,7 @@ Commands:
                                  Open member targets for like, reshare, upvote, rate, or comment
   worker run [--once]            Poll community targets durably in the background
   worker status                  Inspect persisted worker queue and health
+  worker policy                  Show action policy; configure exact GitHub targets
   worker slack source <mode>     Choose auto, community, or local Slack discovery
   community-queue [platform]     Show a flat queue of community action targets
   community-open [platform]      Open queued community action targets
@@ -174,6 +175,8 @@ Options:
   --target <username>            External platform username being acted on
   --target-url <url>             External platform target URL being acted on
   --target-type <type>           External target type: profile, post, or project
+  --github-user <users>          Worker follow allowlist, comma-separated GitHub usernames
+  --github-repository <repos>    Worker star allowlist, comma-separated owner/repo names
   --type <event>                 External event type: follow, like, reshare, upvote, rate, comment
   --username <username>          Your external platform username
   --profile-url <url>            Your external platform profile URL
@@ -6690,6 +6693,7 @@ const main = async () => {
           const policy = validatePolicy({...readPolicy(), mode: flags.mode,
             ...(flags.mode === "execute" ? {accountRevision:accountRevision()} : {}),
             ...(flags["github-repository"] ? {githubRepositories:String(flags["github-repository"]).split(",")} : {}),
+            ...(flags["github-user"] ? {githubUsers:String(flags["github-user"]).split(",")} : {}),
             ...(flags["max-external-per-day"] ? {maxExternalPerDay:Number(flags["max-external-per-day"])} : {}),
           })
           mkdirSync(directory, {recursive:true,mode:0o700})
