@@ -27,6 +27,7 @@ export function slackMembership(snapshot, target, now=Date.now()) {
       if (owner.origin===url.origin && (url.pathname===path || url.pathname.startsWith(`${path}/`))) return {
         workspaceId:snapshot.workspaceId,channelId:snapshot.channelId,slackUserId:identity.slackUserId,
         observedAt:snapshot.observedAt,expiresAt:snapshot.expiresAt,
+        ...(url.origin==='https://github.com' && /^\/[^/]+\/[^/]+\/issues(?:\/|$)/.test(url.pathname)?{relationship:'member_project'}:{}),
       }
     }
   }
@@ -52,7 +53,7 @@ export function prioritizeSlack(state, snapshot, now=Date.now()) {
     job.slackEvidence=evidence
     job.target.slackMember=Boolean(evidence)
     job.priority=evidence?0:shared?1:2
-    job.priorityReason=evidence?'verified_slack_owner':shared?'slack_member_shared':'community_target'
+    job.priorityReason=evidence?(evidence.relationship==='member_project'?'verified_slack_project':'verified_slack_owner'):shared?'slack_member_shared':'community_target'
 
   }
   state.slackHealth=!snapshot?'not_configured':snapshot.expiresAt<=now || snapshot.observedAt>now?'evidence_expired':'verified'

@@ -80,6 +80,8 @@ export function extractPage(html, sourceUrl) {
   let title = ''
   const links = new Set()
   const codeLinks = new Set()
+  const issueLinks = new Set()
+  const source=new URL(sourceUrl),sourceParts=source.pathname.split('/').filter(Boolean)
   const text = node => node.nodeName === '#text' ? node.value : (node.childNodes ?? []).map(text).join(' ')
   const nodes = [root]
   while (nodes.length) {
@@ -90,10 +92,10 @@ export function extractPage(html, sourceUrl) {
       const key = (attrs.property ?? attrs.name ?? '').toLowerCase()
       if (['description','og:title','og:description','og:type'].includes(key)) metadata[key] = compact(attrs.content, 1000)
     }
-    if (node.tagName === 'a' && attrs.href && links.size < 20) {
+    if (node.tagName === 'a' && attrs.href) {
       try {
         const url = publicUrl(new URL(attrs.href, sourceUrl))
-        if (url.origin === new URL(sourceUrl).origin) links.add(url.href)
+        if (url.origin === source.origin && links.size<20) links.add(url.href)
         const parts=url.pathname.split('/').filter(Boolean)
         // Public profile repository cards identify their exact owner/repository.
         // Generic footer links or anonymous external recommendations do not.
@@ -101,17 +103,22 @@ export function extractPage(html, sourceUrl) {
           url.hostname==='github.com' && parts.length===2 && compact(text(node),1000).includes(parts.join('/')) && codeLinks.size<20) {
           url.search='';codeLinks.add(url.href.replace(/\/$/,''))
         }
+        if(source.origin==='https://github.com' && (sourceParts.length===2||(sourceParts.length===3&&sourceParts[2]==='issues')) &&
+          url.origin===source.origin && !url.search && parts[0]?.toLowerCase()===sourceParts[0].toLowerCase() && parts[1]?.toLowerCase()===sourceParts[1].toLowerCase() &&
+          parts[2]==='issues' && (parts.length===3||(parts.length===4&&/^[1-9]\d{0,9}$/.test(parts[3]))) && url.href!==source.href && issueLinks.size<20)issueLinks.add(url.href)
       } catch {}
     }
     nodes.push(...(node.childNodes ?? []))
   }
   return { title: metadata['og:title'] ?? title, description: metadata['og:description'] ?? metadata.description ?? '',
-    type: metadata['og:type'] ?? null, links: [...links].sort(), codeLinks:[...codeLinks].sort(), contentHash: createHash('sha256').update(html).digest('hex') }
+    type: metadata['og:type'] ?? null, links: [...links].sort(), codeLinks:[...codeLinks].sort(),issueLinks:[...issueLinks].sort(), contentHash: createHash('sha256').update(html).digest('hex') }
 }
 export function memberCandidates(target, observation) {
-  const username = target.username
+  const source=new URL(target.profileUrl??target.targetUrl)
+  const sourceParts=source.pathname.split('/').filter(Boolean)
+  const username = target.username ?? (target.platform==='github'?sourceParts[0]:undefined)
   if (!username) return []
-  const content=observation.links.flatMap(link => {
+  const content=(observation.links??[]).flatMap(link => {
     if(target.platform==='github') return []
     const url = new URL(link)
     const path = url.pathname
@@ -124,14 +131,23 @@ export function memberCandidates(target, observation) {
       attribution: 'unverified_link' }] : []
   })
   const githubProfile=target.platform==='github' && new URL(target.profileUrl ?? target.targetUrl).pathname.split('/').filter(Boolean).length===1
-  const profileRepositories=githubProfile?observation.links.filter(link=>{
+  const profileRepositories=githubProfile?(observation.links??[]).filter(link=>{
     const url=new URL(link), parts=url.pathname.split('/').filter(Boolean)
     return url.origin==='https://github.com' && parts.length===2 && parts[0].toLowerCase()===username.toLowerCase()
   }):[]
   const repositories=[...new Set([...(observation.codeLinks ?? []),...profileRepositories])].map(link=>({platform:'github',eventType:'inspect',targetType:'project',
     username:new URL(link).pathname.split('/').filter(Boolean)[0],profileUrl:link,source:'member_profile_repository',
     discoveredFrom:target.profileUrl,attribution:'published_profile_repository'}))
-  return [...content,...repositories]
+  const issues=target.platform==='github' && source.origin==='https://github.com' &&
+    (sourceParts.length===2||(sourceParts.length===3&&sourceParts[2]==='issues'))
+    ? (observation.issueLinks??observation.links??[]).flatMap(link=>{
+      const url=new URL(link),parts=url.pathname.split('/').filter(Boolean)
+      if(url.origin!==source.origin||url.search||parts[0]?.toLowerCase()!==sourceParts[0].toLowerCase()||parts[1]?.toLowerCase()!==sourceParts[1].toLowerCase()||parts[2]!=='issues'||url.href===source.href ||
+        !(parts.length===3||(parts.length===4&&/^[1-9]\d{0,9}$/.test(parts[3]))))return []
+      return [{platform:'github',eventType:'inspect',targetType:parts.length===3?'listing':'post',username:parts[0],profileUrl:link,
+        source:'repository_issue_link',discoveredFrom:target.profileUrl??target.targetUrl,attribution:'repository_issue_author_unverified'}]
+    }):[]
+  return [...content,...repositories,...issues]
 
 }
 export async function scrapeTarget({ target, hosts, signal, now = Date.now, request = publicPage, checkpoint = () => {} }) {
