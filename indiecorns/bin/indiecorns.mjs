@@ -24,6 +24,7 @@ import { manageService } from "../lib/service.mjs"
 import { runWorker, workerStatus, enqueue, saveState } from "../lib/worker.mjs"
 import { syncCommunityFeed } from "../lib/community-feed.mjs"
 import { assertWorkerRuntime } from "../lib/worker-lock.mjs"
+import { readHealthReport } from "../lib/health.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -123,6 +124,7 @@ Commands:
                                  Open member targets for like, reshare, upvote, rate, or comment
   worker run [--once]            Poll community targets durably in the background
   worker status                  Inspect persisted worker queue and health
+  worker health [--hours 24]     Inspect bounded heartbeat and progress history
   worker policy                  Show action policy; configure exact GitHub targets
   worker slack source <mode>     Choose auto, community, or local Slack discovery
   community-queue [platform]     Show a flat queue of community action targets
@@ -6731,6 +6733,10 @@ const main = async () => {
       }
       if (args[0] === "status") {
         printJson(workerStatus(directory))
+        return 0
+      }
+      if (args[0] === "health") {
+        printJson(readHealthReport(directory,{hours:Number(flags.hours??24)}))
         return 0
       }
       if (args[0] !== "run") throw new Error("Use worker run [--once] or worker status")
