@@ -301,7 +301,9 @@ indiecorns worker slack status
 The app needs `channels:read`, `channels:history` and `users:read`, and must be
 added to that channel. The worker reads new channel messages every five minutes
 and resumes history pagination through a saved opaque cursor. It extracts public
-links from active members and stores provenance, not message bodies. Verified
+links from channel messages and app notifications, including rich-text blocks,
+and stores provenance rather than message bodies. Media/file bodies are rejected
+before download. Verified
 member-owned targets come first, then links shared by members, then other
 community targets. A shared link does not establish external project ownership.
 API rate limits and pending pages retain their deadlines across restarts.

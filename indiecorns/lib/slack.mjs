@@ -102,11 +102,19 @@ export async function refreshSlackEvidence({ snapshot:input,token,request=fetch,
 export function sharedTargets(messages, snapshot, now=Date.now()) {
   validateSlackEvidence(snapshot)
   if (snapshot.expiresAt<=now || snapshot.observedAt>now) return []
-  const members=new Set(snapshot.memberIds)
   const targets=new Map()
   for (const message of messages) {
-    if (!members.has(message.user) || typeof message.text!=='string' || !/^\d+\.\d{6}$/.test(message.ts ?? '')) continue
-    const links=new Set([...message.text.matchAll(/https:\/\/[^\s<>|]+/g)].map(match=>match[0].replace(/&amp;/g,'&')))
+    if (!/^\d+\.\d{6}$/.test(message.ts ?? '')) continue
+    const fragments=[]
+    const walk=(value,key='',depth=0)=>{
+      if(depth>12 || fragments.length>=1000) return
+      if(typeof value==='string' && ['text','url','title_link','author_link','from_url','original_url','fallback'].includes(key)) fragments.push(value)
+      else if(Array.isArray(value)) for(const item of value) walk(item,key,depth+1)
+      else if(value && typeof value==='object') for(const [child,item] of Object.entries(value)) walk(item,child,depth+1)
+    }
+    walk({text:message.text,attachments:message.attachments,blocks:message.blocks})
+    const links=new Set([...fragments.join(' ').matchAll(/https:\/\/[^\s<>|]+/g)].map(match=>match[0].replace(/&amp;/g,'&')))
+
     for (const value of links) {
       try {
         const url=new URL(value)

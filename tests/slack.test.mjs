@@ -56,14 +56,14 @@ test('Slack bots and deleted accounts are excluded from membership priority',asy
 
 import {sharedTargets,discoverSlackShared} from '../indiecorns/lib/slack.mjs'
 
-test('channel discovery extracts public links from active members without claiming external ownership',()=>{
+test('channel discovery includes community links without claiming external ownership',()=>{
   const s=snapshot()
   const targets=sharedTargets([
     {user:'UMEMBER',ts:'1000.000001',text:'My project <https://peerlist.io/maker/project/app|app> and https://github.com/maker/project'},
     {user:'UNONMEMBER',ts:'1000.000002',text:'https://other.example/'},
     {user:'UMEMBER',ts:'1000.000003',text:'<mailto:person@example.com> <https://user:secret@example.com/private>'},
   ],s,5000)
-  assert.equal(targets.length,2)
+  assert.equal(targets.length,3)
   assert.equal(targets[0].attribution,'shared_link_owner_unverified')
   assert.ok(targets.every(target=>!target.slackMember))
   assert.equal(targets[1].platform,'github')
@@ -90,4 +90,15 @@ test('Slack history preserves precise timestamps and opaque pagination cursors',
   assert.equal(result.targets.length,1)
   await assert.rejects(discoverSlackShared({snapshot:snapshot(),token:'secret',now:5000,
     request:async()=>new Response(null,{status:429,headers:{'retry-after':'180'}})}),e=>e.retryAfterMs===180000)
+})
+
+
+test('community app notifications are discovered without promoting bots as human members',()=>{
+  const targets=sharedTargets([{bot_id:'BBOT',ts:'1000.000001',text:'',attachments:[{title_link:'https://github.com/maker/project',image_url:'https://example.com/private-video.mp4'}]}],snapshot(),5000)
+  assert.equal(targets.length,1)
+  assert.equal(targets[0].platform,'github')
+  const state={jobs:{sample:{target:targets[0]}}}
+  prioritizeSlack(state,snapshot(),5000)
+  assert.equal(state.jobs.sample.priority,2)
+  assert.equal(state.jobs.sample.target.slackMember,false)
 })

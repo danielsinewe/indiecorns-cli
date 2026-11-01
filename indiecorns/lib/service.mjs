@@ -1,5 +1,5 @@
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { posix, win32, dirname } from 'node:path'
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { posix, win32, dirname, join } from 'node:path'
 import { homedir, platform } from 'node:os'
 import { spawnSync } from 'node:child_process'
 const label = 'com.indiecorns.worker'
@@ -71,6 +71,16 @@ export function manageService(action, options) {
     userId = identity.match(/S-\d+(?:-\d+)+/)?.[0]
   }
   const definition = serviceDefinition({...options, userId})
+  const stopWindowsWorker = () => {
+    let lock
+    try { lock = JSON.parse(readFileSync(join(options.home ?? homedir(), '.indiecorns', 'worker', 'worker.lock'), 'utf8')) }
+    catch (error) { if (error.code === 'ENOENT') return; throw error }
+    if (!Number.isSafeInteger(lock.pid) || lock.pid <= 0) throw new Error('Invalid worker process identity')
+    // Task Scheduler can stop its launcher without terminating the child. Check
+    // the executable AND exact CLI path before terminating the lock's process.
+    const script = `$candidate = Get-CimInstance Win32_Process -Filter 'ProcessId = ${lock.pid}' -ErrorAction Stop; if ($candidate -and $candidate.ExecutablePath -and $candidate.CommandLine -and $candidate.ExecutablePath.Equals(${psQuote(options.node ?? process.execPath)}, [StringComparison]::OrdinalIgnoreCase) -and $candidate.CommandLine.IndexOf(${psQuote(options.cli)}, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and $candidate.CommandLine -match 'worker["\\s]+run') { Stop-Process -Id ${lock.pid} -Force -ErrorAction Stop }`
+    run('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script])
+  }
   const domain = `gui/${process.getuid?.()}`
   if (action === 'install') {
     mkdirSync(dirname(definition.path), { recursive: true })
@@ -78,6 +88,7 @@ export function manageService(action, options) {
     if (system === 'win32') {
       writeFileSync(definition.launcherPath, definition.launcherContent, {mode:0o600})
       run('schtasks.exe', ['/End', '/TN', definition.taskName], true)
+      stopWindowsWorker()
       run('schtasks.exe', ['/Create', '/TN', definition.taskName, '/XML', definition.path, '/F'])
       run('schtasks.exe', ['/Run', '/TN', definition.taskName])
     } else if (system === 'darwin') {
@@ -102,6 +113,7 @@ export function manageService(action, options) {
     if (system === 'win32') {
       run('schtasks.exe', ['/End', '/TN', definition.taskName], true)
       run('schtasks.exe', ['/Delete', '/TN', definition.taskName, '/F'], true)
+      stopWindowsWorker()
       rmSync(definition.launcherPath, {force:true})
     } else if (system === 'darwin') run('launchctl', ['bootout', `${domain}/${label}`], true)
     else run('systemctl', ['--user', 'disable', '--now', 'indiecorns-worker.service'], true)

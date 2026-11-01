@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { extractPage, isPublicIPv4, publicUrl, scrapeTarget, memberCandidates } from '../indiecorns/lib/scraper.mjs'
+import { extractPage, isPublicIPv4, publicUrl, scrapeTarget, memberCandidates, decodeText } from '../indiecorns/lib/scraper.mjs'
 
 test('scraper rejects private, special and credential-bearing network targets', () => {
   for (const address of ['127.0.0.1','10.1.2.3','172.31.1.1','192.168.0.1','169.254.169.254','100.64.0.1','198.18.0.1','0.0.0.0','224.1.1.1','::1']) assert.equal(isPublicIPv4(address),false,address)
@@ -61,4 +61,13 @@ test('robots rate limits delay the entire host and persist before returning', as
     checkpoint:()=>checkpoints++,request:async()=>({status:429,headers:{'retry-after':'3600'},text:''})}), e=>e.code==='HOST_DELAY' && e.retryAt===3601000)
   assert.equal(hosts['https://example.com'].nextRequestAt,3601000)
   assert.equal(checkpoints,2)
+})
+
+
+import {gzipSync} from 'node:zlib'
+test('compressed text respects the decoded body limit and unreadable robots fail closed',async()=>{
+  assert.equal(decodeText(gzipSync(Buffer.from('<title>Project</title>')),'gzip',100),'<title>Project</title>')
+  assert.throws(()=>decodeText(gzipSync(Buffer.from('x'.repeat(1000))),'gzip',100))
+  await assert.rejects(scrapeTarget({target:{profileUrl:'https://example.com/project'},hosts:{},now:()=>1000,
+    request:async()=>({status:200,text:'',bodyRejected:true,headers:{'content-type':'application/octet-stream'}})}),/Robots content unavailable/)
 })

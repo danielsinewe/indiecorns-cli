@@ -4,6 +4,7 @@ import { isIP } from 'node:net'
 import { parse } from 'parse5'
 import robotsParser from 'robots-parser'
 import { createHash } from 'node:crypto'
+import { gunzipSync, inflateSync, brotliDecompressSync } from 'node:zlib'
 
 const agent = 'IndiecornsBot/0.1 (+https://indiecorns.com)'
 export const isPublicIPv4 = address => {
@@ -26,6 +27,13 @@ export function publicUrl(value) {
 }
 // Pin the connection to the validated DNS result, preventing DNS rebinding.
 // No cookies, API credentials, JavaScript execution or implicit redirects.
+export function decodeText(bytes, encoding, limit) {
+  const decoders={gzip:gunzipSync,deflate:inflateSync,br:brotliDecompressSync}
+  const token=String(encoding ?? 'identity').toLowerCase()
+  const decoded=token==='identity'?bytes:Object.hasOwn(decoders,token)?decoders[token](bytes,{maxOutputLength:limit}):null
+  if (!decoded || decoded.length>limit) throw new Error('Unsupported or oversized page encoding')
+  return decoded.toString('utf8')
+}
 export async function publicPage(value, { signal, limit = 1048576 } = {}) {
   const url = publicUrl(value)
   const addresses = await lookup(url.hostname, { all: true, family: 4 })
@@ -39,15 +47,27 @@ export async function publicPage(value, { signal, limit = 1048576 } = {}) {
         ? callback(null, [{ address: addresses[0].address, family: 4 }])
         : callback(null, addresses[0].address, 4),
     }, response => {
+      response.on('error', reject)
+      // Inspect headers before consuming a body: media and files are never fetched
+      // into the page parser, even when a channel includes those links.
+      const contentType=String(response.headers['content-type'] ?? '')
+      if (response.statusCode!==200 || !/^(text\/html|text\/plain|application\/xhtml\+xml)(?:;|$)/i.test(contentType)) {
+        resolve({status:response.statusCode,headers:response.headers,text:'',bodyRejected:response.statusCode===200})
+        response.destroy()
+        return
+      }
+      if(Number(response.headers['content-length'])>limit) { response.destroy();reject(new Error('Response too large'));return }
       const chunks = []
       let length = 0
-      response.on('error', reject)
       response.on('data', chunk => {
         length += chunk.length
         if (length > limit) { response.destroy(new Error('Response too large')); return }
         chunks.push(chunk)
       })
-      response.on('end', () => resolve({status: response.statusCode, headers: response.headers, text: Buffer.concat(chunks).toString('utf8')}))
+      response.on('end', () => {
+        try { resolve({status:response.statusCode,headers:response.headers,text:decodeText(Buffer.concat(chunks),response.headers['content-encoding'],limit)}) }
+        catch(error){reject(error)}
+      })
     })
     request.on('error', reject)
     request.end()
@@ -118,6 +138,7 @@ export async function scrapeTarget({ target, hosts, signal, now = Date.now, requ
     reserve()
     const response = await request(new URL('/robots.txt', url), {signal, limit:131072})
     honorRateLimit(response)
+    if(response.bodyRejected) throw new Error('Robots content unavailable')
     if (response.status !== 200 && response.status !== 404) throw new Error('Robots unavailable')
     host.robots = {text:response.status === 404 ? '' : response.text, expiresAt:now() + 86400000}
     checkpoint()
@@ -131,6 +152,6 @@ export async function scrapeTarget({ target, hosts, signal, now = Date.now, requ
   const response = await request(url, {signal})
   honorRateLimit(response)
   if (response.status !== 200) return {status: response.status >= 300 && response.status < 400 ? 'redirect_requires_review' : 'http_unavailable', httpStatus:response.status, url:url.href}
-  if (!String(response.headers['content-type']).includes('text/html')) return {status:'unsupported_content', url:url.href}
+  if (response.bodyRejected || !String(response.headers['content-type']).includes('text/html')) return {status:'unsupported_content', url:url.href}
   return {status:'observed', url:url.href, observedAt:now(), ...extractPage(response.text,url.href)}
 }
