@@ -105,6 +105,10 @@ test('provider search ceilings remain explicit and do not claim all matching pos
 test('a shrinking search restarts from page one instead of remaining stuck past its final page',async()=>{
   const state={jobs:{}},first=fixture({items:Array.from({length:100},(_,i)=>post(i+1)),total:101})
   await syncGithubMemberPosts({state,snapshot:snapshot(),token:'secret',now:()=>NOW,request:first.request})
+  const pending=JSON.parse(JSON.stringify(state)),partial=fixture({items:[],total:0,incomplete:true})
+  await syncGithubMemberPosts({state:pending,snapshot:snapshot(),token:'secret',now:()=>NOW+6000,request:partial.request})
+  assert.equal(Object.values(pending.githubMemberPosts.authors)[0].page,2)
+  assert.equal(pending.githubMemberPosts.health,'partial')
   const shrunk=fixture({items:[],total:1})
   await syncGithubMemberPosts({state,snapshot:snapshot(),token:'secret',now:()=>NOW+6000,request:shrunk.request})
   assert.equal(state.githubMemberPosts.health,'paging')

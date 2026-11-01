@@ -76,7 +76,7 @@ export async function syncGithubMemberPosts({state,snapshot,token,signal,checkpo
           observedAt:now(),expiresAt:Math.min(snapshot.expiresAt,author.identity.expiresAt,now()+6*HOUR)}}
       })
       const digest=createHash('sha256').update(JSON.stringify(staged.map(p=>p.id))).digest('hex')
-      const restart=author.page>1&&data.total_count<=(author.page-1)*100
+      const restart=!data.incomplete_results&&author.page>1&&data.total_count<=(author.page-1)*100
       if(!restart&&author.page>1&&author.pages?.includes(digest))throw new Error('Repeated GitHub search page')
       enqueue(state,staged.map(p=>p.target),now())
       for(const post of staged)cache.proofs[post.id]=post.proof
