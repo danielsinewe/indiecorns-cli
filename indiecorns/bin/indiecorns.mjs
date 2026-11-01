@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process"
 import { credential, storeCredential } from "../lib/credentials.mjs"
 import { validateSlackEvidence, slackSeedTargets, prioritizeSlack, refreshSlackEvidence, discoverSlackShared } from "../lib/slack.mjs"
 import { defaultPolicy, validatePolicy, runActions } from "../lib/actions.mjs"
+import { producthuntUser, observeProducthuntProfile } from "../lib/producthunt.mjs"
 import { discoverCommunity } from "../lib/discovery.mjs"
 import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
 import { prepareServiceRuntime, pruneManagedRuntimes } from "../lib/runtime.mjs"
@@ -182,6 +183,7 @@ Options:
   --github-member-actions <list> Opt in to verified Slack-member star,follow actions
   --github-repository <repos>    Worker star allowlist, comma-separated owner/repo names
   --github-issue <issues>        Worker thumbs-up allowlist, comma-separated owner/repo#number IDs
+  --producthunt-user <users>     Worker follow allowlist, comma-separated Product Hunt usernames
   --type <event>                 External event type: follow, like, reshare, upvote, rate, comment
   --username <username>          Your external platform username
   --profile-url <url>            Your external platform profile URL
@@ -6592,12 +6594,14 @@ const main = async () => {
       const slackPath = join(directory, "slack-evidence.json")
       const slackSettingsPath = join(directory, "slack-settings.json")
       let memberSnapshot = null
+      let activeWorkerState = null
       const slackMode = () => {
         const mode = existsSync(slackSettingsPath) ? JSON.parse(readFileSync(slackSettingsPath,"utf8")).source : "auto"
         if (!["auto","community","local"].includes(mode)) throw new Error("Invalid Slack source")
         return mode
       }
       const updateSlack = async (state, signal, checkpoint) => {
+        activeWorkerState = state
         memberSnapshot = null
         let snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath, "utf8"))) : null
         const mode = slackMode()
@@ -6710,6 +6714,7 @@ const main = async () => {
             ...(Object.hasOwn(flags,"github-user") ? {githubUsers:allowlist("github-user")} : {}),
             ...(Object.hasOwn(flags,"github-issue") ? {githubIssues:allowlist("github-issue")} : {}),
             ...(Object.hasOwn(flags,"github-member-actions") ? {githubMemberActions:allowlist("github-member-actions")} : {}),
+            ...(Object.hasOwn(flags,"producthunt-user") ? {producthuntUsers:allowlist("producthunt-user")} : {}),
             ...(flags["max-external-per-day"] ? {maxExternalPerDay:Number(flags["max-external-per-day"])} : {}),
           })
           mkdirSync(directory, {recursive:true,mode:0o700})
@@ -6771,11 +6776,16 @@ const main = async () => {
             endpoint: getCliEndpoint("/api/public/cli/community-targets", "/api/community/action-targets"),
             headers: getCliAuthHeaders(), signal,progress,onPage,
           }),
-          observe: (target, hosts, signal, checkpoint) => scrapeTarget({ target, hosts, signal, checkpoint }),
+          observe: (target, hosts, signal, checkpoint) => {
+            const producthuntToken = credential(directory,"producthunt")
+            return producthuntUser(target) && producthuntToken
+              ? observeProducthuntProfile({target,token:producthuntToken,state:activeWorkerState,signal,checkpoint})
+              : scrapeTarget({ target, hosts, signal, checkpoint })
+          },
           prioritize: updateSlack,
           deriveTargets: memberCandidates,
           derivationRevision: "member-profile-repos-v3-issues",
-          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), accountRevision:accountRevision()}),
+          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), producthuntToken:credential(directory,"producthunt"), accountRevision:accountRevision()}),
           onCycle: printJson,
         })
         return state.lastError ? 1 : 0

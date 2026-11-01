@@ -305,7 +305,7 @@ Briefs contain source URLs, observed metadata and timestamps; they are not poste
 or counted as engagement. `worker policy --mode collect` disables action work.
 
 External adapters support GitHub stars, member follows and issue thumbs-up
-reactions, using a configured credential and separate exact repository/user/issue
+reactions, plus Product Hunt profile follows, using separate provider credentials and exact repository/user/issue
 allowlists. Execution policies bind to the current
 community account and must be reconfigured after an account change:
 
@@ -387,6 +387,39 @@ external executor. Credentials can also come from `INDIECORNS_GITHUB_TOKEN` or
 `INDIECORNS_SLACK_TOKEN`. The stdin command stores credentials privately with
 mode 0600 so supervised processes can read them; it never prints their values.
 Remove a stored credential with `worker credentials --provider github --remove`.
+
+Product Hunt follows use its [documented userFollow API](https://api-v2-docs.producthunt.com/mutation/userfollow/).
+Its [provider requirements](https://www.producthunt.com/v2/docs) include approved
+write access, `public private write` user scopes and permission for commercial
+API use. A public/client-only token cannot execute this adapter.
+
+```bash
+indiecorns worker credentials --provider producthunt --token-stdin < /secure/path/approved-user-token
+indiecorns worker policy --mode execute --producthunt-user maker --max-external-per-day 5
+```
+
+The exact allowlist accepts usernames without `@`; clear it with
+`--producthunt-user=` and `--mode execute`. Existing policies enable no Product
+Hunt actions. The observed target must be an exact `producthunt.com/@username`
+profile. The adapter verifies viewer and target IDs, rejects self-follow and
+GraphQL errors, reads the relationship before writing, and independently reads
+it again after the mutation. A retry reconciles an existing follow without
+another mutation. Intents, daily budget and completed receipts survive restart.
+GitHub and Product Hunt share the daily cap and Slack-prioritized queue, while
+provider cooldowns remain independent. Responses are bounded and each follow has
+a 90-second deadline. No upvote, rating or comment executor is included.
+
+With a configured credential, profile observations use the documented API's
+public name, headline and identity fields instead of relying on HTML availability.
+The API URL and username must match the queued profile. No email or media is
+requested or stored. API observation rate limits are checkpointed and also pause
+Product Hunt actions, without pausing GitHub. Profiles retain the worker's normal
+six-hour observation interval.
+
+`INDIECORNS_PRODUCTHUNT_TOKEN` is the optional environment credential; the stdin
+command stores it privately for supervised services. Missing credentials or
+permissions remain explicit failures. Product Hunt live authentication and a real
+follow have not been verified in the Mac pilot.
 
 Slack priority normally comes from the authenticated community feed. Members
 without local Slack credentials need only their Indiecorns sign-in. The provider

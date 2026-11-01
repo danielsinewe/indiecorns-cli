@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.8 - 2026-11-01
+
+- Add opt-in Product Hunt profile follows through the documented API, using a
+  separate private credential and exact user allowlist. Existing policies enable none.
+- Verify viewer/target identity and before/after relationship state, preserve
+  receipts across restarts, and reject self-follow or partial GraphQL proof.
+- Observe Product Hunt profiles through the official API when configured, storing
+  only bounded public metadata and sharing persisted provider cooldowns with actions.
+- Share the daily action cap across providers while keeping provider cooldowns
+  independent. Provider-approved write access is required for live execution.
+
 ## 0.4.7 - 2026-11-01
 
 - Add opt-in GitHub stars and follows for freshly verified Slack members, so

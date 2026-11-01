@@ -86,16 +86,31 @@ Its public package is installed on the Mac. The normal worker discovered and
 scraped the verified member-authored issue automatically, increasing the queue
 from 70 to 71 targets while preserving policy, budget, receipts and health history.
 
-The 0.4.7 candidate adds an optional star/follow scope for freshly verified Slack
+Release 0.4.7 adds an optional star/follow scope for freshly verified Slack
 members and their observed public repositories. Exact identity mappings and
 current membership are required; target flags cannot authorize an action.
 Self-actions are excluded after a numeric GitHub actor check. Membership is
 rechecked before writing, and existing quota and receipt keys are shared across
 both policy scopes. Existing policies enable no member-wide actions.
+The published runtime is installed and the pilot uses the member-wide scope with
+its original one-action daily cap. Prior exact user/repository lists were cleared;
+completed receipts still prevent replay. Its current process and minute heartbeat
+passed readback after npm cache removal, retaining all 71 targets and health history.
+
+The 0.4.8 candidate adds exact-allowlisted Product Hunt profile follows through its
+documented API, with a separate credential, identity/relationship proof, a shared
+daily action budget and independent provider cooldowns. There is no configured
+Product Hunt credential or verified live follow. Provider approval and user-level
+write scopes are required. A read-only check of all eight Slack profiles found no
+structured public social links, so no additional identity mappings were inferred.
+Both queued Product Hunt profiles are unavailable to the public HTML scraper.
+Configured credentials now enable official API profile observation before action
+work, with persisted provider cooldowns; this path is covered by a real CLI test
+using a closed mock transport, not by a verified live Product Hunt session.
 
 ## Remaining release and validation work
 
-- Release verified-member action scope and verify the installed runtime, preserving
+- Release the Product Hunt adapter and verify its installed runtime, preserving
   queue, policy, receipts, daily quota and accumulated health history.
 - Validate a real account-authorized follow when provider authentication and the
   pilot’s unchanged daily quota permit it.
@@ -103,7 +118,7 @@ both policy scopes. Existing policies enable no member-wide actions.
   available; no synthetic post or engagement should substitute for that evidence.
 - Validate sustained unattended operation beyond the pilot so far. The machine
   must be awake and online; no full-day, logout or sleep-continuity claim is made.
-- Extend platform action support beyond the GitHub adapters and local
-  briefs. Other platforms’ engagement actions are not implemented by this worker.
+- Verify Product Hunt live authentication/follow proof and extend support for
+  other platform actions. Their engagement actions are not implemented by this worker.
 - Continue validating storage growth as community volume increases; durable
   pending work and receipts deliberately have no automatic hard disk quota.
