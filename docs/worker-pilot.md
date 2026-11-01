@@ -74,7 +74,7 @@ Its public package and live managed-service upgrade passed, preserving accumulat
 health history. Four issue indexes were observed automatically; no reaction was
 enabled or executed.
 
-The 0.4.6 candidate adds read-only public search for recent issues authored by
+Release 0.4.6 adds read-only public search for recent issues authored by
 explicitly mapped Slack members. Numeric GitHub identities and current membership
 are required for author priority outside a member-owned namespace. A live isolated
 probe made four GET requests, found Daniel’s public issue in Stieges/bpmn-generator,
@@ -82,10 +82,20 @@ and assigned verified author priority without changing the live queue or sending
 writes. Poll reservations, pagination, partial-result detection, provider limits,
 evidence expiry and credential-change recovery are tested. Optional source health
 is recorded without retroactively claiming it for older samples.
+Its public package is installed on the Mac. The normal worker discovered and
+scraped the verified member-authored issue automatically, increasing the queue
+from 70 to 71 targets while preserving policy, budget, receipts and health history.
+
+The 0.4.7 candidate adds an optional star/follow scope for freshly verified Slack
+members and their observed public repositories. Exact identity mappings and
+current membership are required; target flags cannot authorize an action.
+Self-actions are excluded after a numeric GitHub actor check. Membership is
+rechecked before writing, and existing quota and receipt keys are shared across
+both policy scopes. Existing policies enable no member-wide actions.
 
 ## Remaining release and validation work
 
-- Release member-authored discovery and verify the installed runtime, preserving
+- Release verified-member action scope and verify the installed runtime, preserving
   queue, policy, receipts, daily quota and accumulated health history.
 - Validate a real account-authorized follow when provider authentication and the
   pilot’s unchanged daily quota permit it.
