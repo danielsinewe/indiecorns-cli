@@ -22,5 +22,21 @@ test('systemd quotes paths and does not expand percent and dollar expressions', 
 test('service configuration rejects malformed paths and intervals', () => {
   assert.throws(() => serviceDefinition({ system: 'linux', cli: '/tmp/a\nExecStart=bad' }), /path/)
   assert.throws(() => serviceDefinition({ cli: '/tmp/cli', interval: NaN }), /configuration/)
-  assert.throws(() => serviceDefinition({ system: 'win32', cli: 'C:/cli' }), /supports/)
+  assert.throws(() => serviceDefinition({ system: 'freebsd', cli: '/tmp/cli' }), /supports/)
+})
+
+
+test('Windows worker runs hidden at login, without a runtime limit, with recurring recovery', () => {
+  const definition = serviceDefinition({ system: 'win32', home: "C:\\Users\\O'Neil", node: 'C:\\Program Files\\nodejs\\node.exe', cli: "C:\\Users\\O'Neil\\community worker\\cli.mjs", userId: 'S-1-5-21-123-456-789-1001' })
+  assert.match(definition.taskName, /^IndiecornsWorker-S-1-5-/)
+  assert.match(definition.content, /<LogonType>InteractiveToken<\/LogonType>/)
+  assert.match(definition.content, /<RunLevel>LeastPrivilege<\/RunLevel>/)
+  assert.match(definition.content, /<ExecutionTimeLimit>PT0S<\/ExecutionTimeLimit>/)
+  assert.match(definition.content, /<MultipleInstancesPolicy>IgnoreNew<\/MultipleInstancesPolicy>/)
+  assert.match(definition.content, /<Interval>PT5M<\/Interval>/)
+  assert.match(definition.content, /<RestartOnFailure><Interval>PT1M/)
+  assert.match(definition.launcherContent, /-WindowStyle Hidden -Wait -PassThru/)
+  assert.match(definition.launcherContent, /O''Neil/)
+  assert.ok(definition.launcherContent.includes(`"C:\\Users\\O''Neil\\community worker\\cli.mjs"`))
+  assert.throws(() => serviceDefinition({system:'win32',cli:'C:/cli',userId:'bad;command'}), /SID/)
 })

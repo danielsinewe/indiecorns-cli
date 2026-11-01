@@ -1,11 +1,13 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { posix, dirname } from 'node:path'
+import { posix, win32, dirname } from 'node:path'
 import { homedir, platform } from 'node:os'
 import { spawnSync } from 'node:child_process'
 const label = 'com.indiecorns.worker'
+const psQuote = value => "'" + String(value).replace(/'/g, "''") + "'"
+const windowsQuote = value => '"' + String(value).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"'
 const xml = value => String(value).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]))
 const unitQuote = value => '"' + String(value).replace(/%/g, '%%').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, () => '$$') + '"'
-export function serviceDefinition({ system = platform(), home = homedir(), node = process.execPath, cli, interval = 300 }) {
+export function serviceDefinition({ system = platform(), home = homedir(), node = process.execPath, cli, interval = 300, userId, windowsRoot = process.env.SystemRoot ?? 'C:\\Windows' }) {
   if (!cli || !Number.isInteger(interval) || interval < 1) throw new Error('Invalid service configuration')
   if ([home, node, cli].some(value => /[\n\r\0]/.test(value))) throw new Error('Invalid service path')
   const args = [node, cli, 'worker', 'run', '--interval-seconds', String(interval), '--no-telemetry']
@@ -28,22 +30,56 @@ export function serviceDefinition({ system = platform(), home = homedir(), node 
     path: posix.join(home, '.config', 'systemd', 'user', 'indiecorns-worker.service'),
     content: `[Unit]\nDescription=Indiecorns community worker\nAfter=network-online.target\n\n[Service]\nExecStart=${args.map(unitQuote).join(' ')}\nRestart=always\nRestartSec=30\nEnvironment=${unitQuote(`HOME=${home}`)}\nStandardOutput=null\nStandardError=null\n\n[Install]\nWantedBy=default.target\n`,
   }
-  throw new Error('Worker service installation supports macOS and Linux; use worker run on other systems')
+  if (system === 'win32') {
+    if (!/^S-\d+(?:-\d+)+$/.test(userId ?? '')) throw new Error('A Windows user SID is required')
+    const taskName = `IndiecornsWorker-${userId}`
+    const launcherPath = win32.join(home, '.indiecorns', 'worker', 'worker-launcher.ps1')
+    const powershell = win32.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const argumentsText = ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-File', launcherPath].map(windowsQuote).join(' ')
+    return {
+      path: win32.join(home, '.indiecorns', 'worker', 'worker-task.xml'), taskName, launcherPath,
+      // Start-Process receives a literal executable and a prequoted argument string;
+      // page content and credentials never enter the generated launcher.
+      launcherContent: '\uFEFF' + `$ErrorActionPreference = 'Stop'\n$worker = Start-Process -FilePath ${psQuote(node)} -ArgumentList ${psQuote(args.slice(1).map(windowsQuote).join(' '))} -WindowStyle Hidden -Wait -PassThru\nexit $worker.ExitCode\n`,
+      content: `<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+<RegistrationInfo><Description>Indiecorns community worker</Description></RegistrationInfo>
+<Triggers>
+<LogonTrigger><Enabled>true</Enabled><UserId>${xml(userId)}</UserId></LogonTrigger>
+<TimeTrigger><Repetition><Interval>PT5M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>2000-01-01T00:00:00Z</StartBoundary><Enabled>true</Enabled></TimeTrigger>
+</Triggers>
+<Principals><Principal id="Member"><UserId>${xml(userId)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable><Enabled>true</Enabled><Hidden>true</Hidden><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>255</Count></RestartOnFailure></Settings>
+<Actions Context="Member"><Exec><Command>${xml(powershell)}</Command><Arguments>${xml(argumentsText)}</Arguments></Exec></Actions>
+</Task>`,
+    }
+  }
+  throw new Error('Worker service installation supports macOS, Linux and Windows; use worker run on other systems')
 }
 export function manageService(action, options) {
   const system = options.system ?? platform()
-  const definition = serviceDefinition(options)
   const run = (command, args, allowMissing = false) => {
     const result = spawnSync(command, args, { encoding: 'utf8' })
     if (result.error) throw result.error
     if (result.status !== 0 && !allowMissing) throw new Error(`${command} failed (${result.status}): ${result.stderr?.trim()}`)
     return result
   }
+  let userId = options.userId
+  if (system === 'win32' && !userId) {
+    const identity = run('whoami.exe', ['/user', '/fo', 'csv', '/nh']).stdout
+    userId = identity.match(/S-\d+(?:-\d+)+/)?.[0]
+  }
+  const definition = serviceDefinition({...options, userId})
   const domain = `gui/${process.getuid?.()}`
   if (action === 'install') {
     mkdirSync(dirname(definition.path), { recursive: true })
     writeFileSync(definition.path, definition.content, { mode: 0o600 })
-    if (system === 'darwin') {
+    if (system === 'win32') {
+      writeFileSync(definition.launcherPath, definition.launcherContent, {mode:0o600})
+      run('schtasks.exe', ['/End', '/TN', definition.taskName], true)
+      run('schtasks.exe', ['/Create', '/TN', definition.taskName, '/XML', definition.path, '/F'])
+      run('schtasks.exe', ['/Run', '/TN', definition.taskName])
+    } else if (system === 'darwin') {
       run('launchctl', ['bootout', `${domain}/${label}`], true)
       // bootout returns before launchd has necessarily removed the old job.
       let loaded = false
@@ -62,13 +98,21 @@ export function manageService(action, options) {
     return { installed: true, path: definition.path }
   }
   if (action === 'uninstall') {
-    if (system === 'darwin') run('launchctl', ['bootout', `${domain}/${label}`], true)
+    if (system === 'win32') {
+      run('schtasks.exe', ['/End', '/TN', definition.taskName], true)
+      run('schtasks.exe', ['/Delete', '/TN', definition.taskName, '/F'], true)
+      rmSync(definition.launcherPath, {force:true})
+    } else if (system === 'darwin') run('launchctl', ['bootout', `${domain}/${label}`], true)
     else run('systemctl', ['--user', 'disable', '--now', 'indiecorns-worker.service'], true)
     rmSync(definition.path, { force: true })
     if (system === 'linux') run('systemctl', ['--user', 'daemon-reload'])
     return { installed: false }
   }
   if (action === 'service-status') {
+    if (system === 'win32') {
+      const result = run('schtasks.exe', ['/Query', '/TN', definition.taskName, '/V', '/FO', 'LIST'], true)
+      return {registered:result.status === 0, detail:result.stdout?.trim()}
+    }
     const result = system === 'darwin'
       ? run('launchctl', ['print', `${domain}/${label}`], true)
       : run('systemctl', ['--user', 'show', 'indiecorns-worker.service', '--property=ActiveState,SubState,MainPID'], true)

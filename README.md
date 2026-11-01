@@ -242,10 +242,12 @@ new targets at 2,000 entries and reports `queue_capacity`; it never silently dro
 unprocessed targets. External engagement adapters are still pending: a successful
 scrape never counts as a follow, vote, rating, comment, or completed support action.
 
-`worker install` registers a macOS launchd agent or a Linux systemd user service
-with automatic restart. These services start on user login; the computer must be
+`worker install` registers a macOS launchd agent, a Linux systemd user service,
+or a Windows scheduled task with automatic recovery. These services start on user login; the computer must be
 awake and online to work. Linux operation after logout needs user lingering
-configured on the host. Windows service installation is pending. Services discard
+configured on the host. Windows tasks run for the logged-in user with no time
+limit, a one-minute failure restart, and a five-minute recurring recovery trigger.
+A hidden PowerShell launcher keeps the worker in the background. Services discard
 stdout/stderr to prevent unbounded logs; inspect `worker status` for persisted
 health. Reinstall after moving the CLI or Node executable.
 No API key or paid model is required for polling. Sign in using `indiecorns login`

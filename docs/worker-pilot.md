@@ -19,7 +19,7 @@ deduplication, independent observation scheduling, and service configuration.
 Remaining goal requirements:
 - Complete ongoing Slack API refresh and map the remaining community identities.
 - Validate real external actions and add the remaining platform executors.
-- Support Windows startup and verify Linux supervision on a Linux host.
+- Validate Windows scheduled startup/crash recovery; Linux startup is CI-verified.
 - Handle discovery pagination/capacity and long-term retention at larger scale.
 - Publish the reviewed CLI release and verify installation outside this checkout.
 - Validate sustained unattended operation, beyond the short pilot so far.
@@ -39,3 +39,9 @@ remote state before/after idempotent writes. It has passed mocked API and replay
 tests; the live pilot has made no external engagement writes. Default actions
 only create local evidence briefs. CI now runs the full suite on macOS, Linux
 and Windows and has verified real Linux systemd supervision on its Linux runner.
+
+Windows Task Scheduler support now includes per-user identity, hidden execution,
+login/recurring triggers, no runtime limit, and crash restart. CI checks out the
+repository into a path containing spaces on all operating systems and adds an
+actual Windows scheduled-start/forced-crash test. This checkpoint does not yet
+claim that the Windows supervision test has passed.

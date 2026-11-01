@@ -11,6 +11,10 @@ permissions:
 
 jobs:
   package:
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: community worker
     strategy:
       fail-fast: false
       matrix:
@@ -19,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          path: community worker
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -48,3 +54,34 @@ jobs:
           systemctl --user is-active indiecorns-worker.service
           sleep 2
           node --input-type=module -e 'import fs from "node:fs"; import os from "node:os"; const state=JSON.parse(fs.readFileSync(os.homedir()+"/.indiecorns/worker/state.json")); if(state.lastError!=="auth_required") process.exit(1)'
+
+      - name: Verify Windows worker supervision and crash recovery
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try {
+            node indiecorns/bin/indiecorns.mjs worker install --no-telemetry
+            if ($LASTEXITCODE -ne 0) { throw "Task installation failed" }
+            $workerDirectory = Join-Path $env:USERPROFILE '.indiecorns/worker'
+            $workerLock = Join-Path $workerDirectory 'worker.lock'
+            $workerState = Join-Path $workerDirectory 'state.json'
+            $workerDeadline = [DateTime]::UtcNow.AddSeconds(40)
+            while (!(Test-Path $workerState) -and [DateTime]::UtcNow -lt $workerDeadline) { Start-Sleep -Seconds 1 }
+            if (!(Test-Path $workerState)) { throw "Scheduled worker did not write state" }
+            $workerHealth = Get-Content $workerState -Raw | ConvertFrom-Json
+            if ($workerHealth.lastError -ne 'auth_required') { throw "Unexpected worker health" }
+            $originalWorkerPid = (Get-Content $workerLock -Raw | ConvertFrom-Json).pid
+            Get-Process -Id $originalWorkerPid -ErrorAction Stop | Out-Null
+            Stop-Process -Id $originalWorkerPid -Force
+            $workerDeadline = [DateTime]::UtcNow.AddSeconds(100)
+            $replacementWorkerPid = $originalWorkerPid
+            while ($replacementWorkerPid -eq $originalWorkerPid -and [DateTime]::UtcNow -lt $workerDeadline) {
+              Start-Sleep -Seconds 3
+              if (Test-Path $workerLock) { $replacementWorkerPid = (Get-Content $workerLock -Raw | ConvertFrom-Json).pid }
+            }
+            if ($replacementWorkerPid -eq $originalWorkerPid) { throw "Task Scheduler did not restart the worker" }
+            Get-Process -Id $replacementWorkerPid -ErrorAction Stop | Out-Null
+            node indiecorns/bin/indiecorns.mjs worker service-status --no-telemetry
+          } finally {
+            node indiecorns/bin/indiecorns.mjs worker uninstall --no-telemetry
+          }
