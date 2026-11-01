@@ -77,3 +77,48 @@ test('new credentials bypass old authentication backoff without resetting jobs',
     assert.equal(state.pending.length, 1)
   } finally { rmSync(directory, { recursive: true }) }
 })
+
+test('observations run independently of API backoff and discovered links enter the durable queue', async () => {
+  const directory = fixture()
+  try {
+    const options = {directory, once:true, now:()=>1000, discover:async()=>[target('maker')]}
+    await runWorker(options)
+    let polls=0
+    const state=await runWorker({...options, discover:async()=>{polls++;return []},
+      observe:async()=>({status:'observed',title:'Maker'}), deriveTargets:()=>[target('maker/status/1')]})
+    assert.equal(polls,0)
+    assert.equal(Object.keys(state.jobs).length,2)
+    assert.equal(Object.values(state.jobs).filter(job=>job.observation?.status==='observed').length,1)
+    assert.ok(Object.values(state.jobs).every(job=>job.status==='queued'))
+  } finally {rmSync(directory,{recursive:true})}
+})
+
+test('server retry-after survives restart while partial results stay queued', async () => {
+  const directory=fixture()
+  try {
+    const options={directory,once:true,now:()=>1000,intervalMs:1000,
+      discover:async()=>({targets:[target('partial')],partial:true,retryAfterMs:120000,sources:[]})}
+    const first=await runWorker(options)
+    assert.equal(first.nextPollAt,121000)
+    assert.equal(first.lastError,'partial_discovery')
+    assert.equal(first.pending.length,1)
+    let polls=0
+    await runWorker({...options,now:()=>5000,discover:async()=>{polls++;return []}})
+    assert.equal(polls,0)
+  }finally{rmSync(directory,{recursive:true})}
+})
+
+test('discovery upgrades wake healthy schedules and preserve server cooldowns', async () => {
+  const directory=fixture()
+  try {
+    let polls=0
+    const options={directory,once:true,now:()=>1000,discover:async()=>{polls++;return []}}
+    await runWorker(options)
+    await runWorker({...options,discoveryRevision:'expanded'})
+    assert.equal(polls,2)
+    await runWorker({...options,now:()=>1000000,discoveryRevision:'expanded',
+      discover:async()=>({targets:[],partial:true,retryAfterMs:3600000})})
+    await runWorker({...options,now:()=>1000100,discoveryRevision:'newer'})
+    assert.equal(polls,2)
+  }finally{rmSync(directory,{recursive:true})}
+})

@@ -14,6 +14,8 @@ import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { spawnSync } from "node:child_process"
 
+import { discoverCommunity } from "../lib/discovery.mjs"
+import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
 import { manageService } from "../lib/service.mjs"
 import { runWorker, workerStatus } from "../lib/worker.mjs"
 
@@ -6592,22 +6594,17 @@ const main = async () => {
         const state = await runWorker({
           directory,
           authRevision: createHash("sha256").update(JSON.stringify(getCliAuthHeaders())).digest("hex"),
+          discoveryRevision: "community-13-v1",
           once: Boolean(flags.once),
           intervalMs: Number(flags["interval-seconds"] ?? 300) * 1000,
           signal: controller.signal,
-          discover: async (signal) => {
-            const headers = getCliAuthHeaders()
-            if (!headers) throw Object.assign(new Error("Login required"), { code: "AUTH_REQUIRED" })
-            const endpoint = getCliEndpoint("/api/public/cli/community-targets", "/api/community/action-targets")
-            const response = await fetch(`${getAppUrl(flags)}${endpoint}?limit=100`, {
-              headers, signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
-              redirect: "error",
-            })
-            if ([401, 403].includes(response.status)) throw Object.assign(new Error("Login required"), { code: "AUTH_REQUIRED" })
-            if (!response.ok) throw new Error("Discovery failed")
-            const body = await response.json()
-            return body.targets
-          },
+          discover: signal => discoverCommunity({
+            appUrl: getAppUrl(flags),
+            endpoint: getCliEndpoint("/api/public/cli/community-targets", "/api/community/action-targets"),
+            headers: getCliAuthHeaders(), signal,
+          }),
+          observe: (target, hosts, signal, checkpoint) => scrapeTarget({ target, hosts, signal, checkpoint }),
+          deriveTargets: memberCandidates,
           onCycle: printJson,
         })
         return state.lastError ? 1 : 0

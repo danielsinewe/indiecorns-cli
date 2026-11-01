@@ -25,15 +25,30 @@ export function targetKey(target) {
   ])).digest('hex')
 }
 export function enqueue(state, targets, now) {
-  for (const target of targets) {
-    const key = targetKey(target)
-    if (state.jobs[key]) continue
+  const candidates = targets.map(raw => {
+    const target = Object.fromEntries(['platform', 'eventType', 'targetType', 'targetSource', 'userId', 'username',
+      'displayName', 'profileUrl', 'targetUrl', 'source', 'discoveredFrom', 'attribution'].flatMap(key =>
+      typeof raw[key] === 'string' ? [[key, raw[key].slice(0, key.toLowerCase().includes('url') || key === 'discoveredFrom' ? 2048 : 256)]] : []))
+    target.slackMember = raw.slackMember === true
+    return {key: targetKey(target), target}
+  })
+  if (new Set([...Object.keys(state.jobs), ...candidates.map(item => item.key)]).size > 2000) {
+    throw Object.assign(new Error('Queue capacity reached'), {code:'QUEUE_CAPACITY'})
+  }
+  for (const { key, target } of candidates) {
+    const existing = state.jobs[key]
+    if (existing) {
+      // Membership evidence can change while a target remains in the queue.
+      existing.target.slackMember = target.slackMember
+      existing.priority = target.slackMember ? 0 : 1
+      continue
+    }
     state.jobs[key] = { key, target, status: 'queued', discoveredAt: now,
-      priority: target.slackMember === true ? 0 : 1 }
+      priority: target.slackMember ? 0 : 1 }
   }
 }
 export async function runWorker({ directory, discover, once = false, intervalMs = 300000,
-  signal, now = Date.now, onCycle = () => {}, authRevision }) {
+  signal, now = Date.now, onCycle = () => {}, authRevision, discoveryRevision, observe, deriveTargets, observationLimit = 5 }) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw new Error('Interval must be at least 1000ms')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const lock = join(directory, 'worker.lock')
@@ -55,33 +70,66 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
       state.nextPollAt = 0
       state.authRevision = authRevision
     }
+    if (discoveryRevision && state.discoveryRevision !== discoveryRevision && !state.lastError && !(state.retryAfterMs > 0)) state.nextPollAt = 0
     do {
       if (signal?.aborted) break
-      const delay = Math.max(0, state.nextPollAt - now())
-      if (delay) {
-        if (once) return state
-        await sleep(delay, undefined, { signal }).catch(error => { if (error.name !== 'AbortError') throw error })
-        if (signal?.aborted) break
+      if (state.nextPollAt <= now()) {
+        state.retryAfterMs = 0
+        try {
+          const result = await discover(signal)
+          const targets = Array.isArray(result) ? result : result.targets
+          if (!Array.isArray(targets)) throw new Error('Discovery must return targets')
+          enqueue(state, targets, now())
+          state.discoveryRevision = discoveryRevision
+          state.sources = result.sources ?? []
+          state.partial = result.partial === true
+          state.retryAfterMs = result.retryAfterMs ?? 0
+          state.failures = state.partial ? state.failures + 1 : 0
+          if (!state.partial) state.lastSuccessAt = now()
+          state.lastError = state.partial ? 'partial_discovery' : null
+        } catch (error) {
+          if (signal?.aborted) break
+          state.failures++
+          // Persist only classified errors, never tokens, response bodies or URLs.
+          state.lastError = error.code === 'AUTH_REQUIRED' ? 'auth_required' : error.code === 'QUEUE_CAPACITY' ? 'queue_capacity' : 'discovery_failed'
+        }
+        state.lastPollAt = now()
+        state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
-      try {
-        const targets = await discover(signal)
-        if (!Array.isArray(targets)) throw new Error('Discovery must return targets')
-        enqueue(state, targets, now())
-        state.failures = 0
-        state.lastSuccessAt = now()
-        state.lastError = null
-      } catch (error) {
-        state.failures++
-        // Persist only classified errors, never tokens, response bodies or URLs.
-        state.lastError = error.code === 'AUTH_REQUIRED' ? 'auth_required' : 'discovery_failed'
+      state.pending = Object.values(state.jobs).filter(job => job.status === 'queued')
+        .sort((a, b) => a.priority - b.priority || a.discoveredAt - b.discoveredAt).map(job => job.key)
+      // Save discovery and scheduling before any outbound page request.
+      saveState(path, state)
+      if (observe && state.lastError !== 'auth_required') {
+        state.hosts ??= {}
+        const due = state.pending.map(key => state.jobs[key]).filter(job => !job.nextObserveAt || job.nextObserveAt <= now())
+        for (const job of due.slice(0, observationLimit)) {
+          if (signal?.aborted) break
+          try {
+            job.observation = await observe(job.target, state.hosts, signal, () => saveState(path, state))
+            if (deriveTargets && job.observation.status === 'observed') enqueue(state, deriveTargets(job.target, job.observation), now())
+            job.observationFailures = 0
+            job.nextObserveAt = now() + 21600000
+            job.observationError = null
+          } catch (error) {
+            if (signal?.aborted) break
+            job.observationFailures = (job.observationFailures ?? 0) + 1
+            job.nextObserveAt = error.retryAt ?? now() + Math.min(86400000, 60000 * 2 ** Math.min(job.observationFailures, 10))
+            job.observationError = error.code === 'HOST_DELAY' ? 'host_cooldown' : 'observation_failed'
+          }
+          saveState(path, state)
+        }
       }
-      state.lastPollAt = now()
-      state.nextPollAt = now() + Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10))
       state.pending = Object.values(state.jobs).filter(job => job.status === 'queued')
         .sort((a, b) => a.priority - b.priority || a.discoveredAt - b.discoveredAt).map(job => job.key)
       saveState(path, state)
       onCycle({ pending: state.pending.length, lastError: state.lastError, nextPollAt: state.nextPollAt })
       if (once) return state
+      const dueObservations = observe && state.lastError !== 'auth_required'
+        ? Object.values(state.jobs).filter(job => job.status === 'queued').map(job => job.nextObserveAt ?? now()) : []
+      const wakeAt = Math.min(state.nextPollAt, ...dueObservations)
+      await sleep(Math.max(100, wakeAt - now()), undefined, {signal})
+        .catch(error => { if (error.name !== 'AbortError') throw error })
     } while (!signal?.aborted)
     return state
   } finally {

@@ -220,7 +220,9 @@ indiecorns worker service-status
 indiecorns worker uninstall
 ```
 
-The worker polls the authenticated community target endpoint, persists a local
+The worker polls 13 explicit profile/post/project sources across Peerlist, X,
+LinkedIn and Product Hunt using the authenticated community target endpoint. It
+persists a local
 queue in `~/.indiecorns/worker/state.json`, deduplicates targets across restarts,
 and uses exponential backoff for failed requests. SIGINT and SIGTERM release
 ownership cleanly; a restarted process can reclaim a dead worker's lock. One
@@ -228,13 +230,23 @@ worker can run per local account. Requests time out after 30 seconds.
 
 Targets carrying explicit `slackMember: true` evidence are queued first.
 The worker does not infer Slack membership from community registration.
-It currently collects targets only: it does not scrape external pages, send
-messages, execute engagement, or claim completed actions. External discovery, scraping, and action adapters are still required for the full
-unattended workflow. `worker install` registers a macOS launchd agent or a Linux
-systemd user service with automatic restart. These services start on user login;
-the computer must be awake and online to work. Linux operation after logout needs
-user lingering configured on the host. Windows service installation is pending.
-Services discard stdout/stderr to prevent unbounded logs; inspect `worker status`
-for persisted health. Reinstall after moving the CLI or Node executable.
+Public pages are scraped with a transparent bot user agent. The scraper checks
+robots.txt first, honors crawl delays and host cooldowns across restarts, limits
+response sizes, and connects only to validated public IPv4 addresses over HTTPS.
+It neither executes page scripts nor follows redirects implicitly. A site that
+requires browser rendering, login, or a redirect remains explicitly unresolved.
+Observations refresh every six hours independently of API discovery. Links to
+posts and projects under the same member path enter the queue with unverified
+link attribution; a link alone is not proof of authorship. The queue stops adding
+new targets at 2,000 entries and reports `queue_capacity`; it never silently drops
+unprocessed targets. External engagement adapters are still pending: a successful
+scrape never counts as a follow, vote, rating, comment, or completed support action.
+
+`worker install` registers a macOS launchd agent or a Linux systemd user service
+with automatic restart. These services start on user login; the computer must be
+awake and online to work. Linux operation after logout needs user lingering
+configured on the host. Windows service installation is pending. Services discard
+stdout/stderr to prevent unbounded logs; inspect `worker status` for persisted
+health. Reinstall after moving the CLI or Node executable.
 No API key or paid model is required for polling. Sign in using `indiecorns login`
 first; missing or expired authentication is recorded as `auth_required`.
