@@ -339,6 +339,21 @@ their six-hour cooldown instead of being reset by rediscovery.
 Slack priority for a member-owned repository's issue means `verified_slack_project`;
 it does not claim that the member authored the post. Other platforms' post actions
 still produce local briefs rather than an external reaction.
+
+With a GitHub credential, the worker also searches for public issues updated
+within the last thirty days by members' explicitly mapped GitHub accounts. It
+verifies numeric provider IDs before assigning `verified_slack_author` priority,
+so a member's post can be recognized outside a member-owned repository. Arbitrary
+target author fields cannot grant that priority. Expiry, changed profile mappings
+or channel departure withdraw it without deleting queued work.
+
+Each completed author scan waits fifteen minutes. Two authors are processed per
+cycle, search requests are spaced at least 2.1 seconds apart, and reserved polls,
+pagination and cooldowns survive restarts. Incomplete results and GitHub's
+1,000-result search ceiling stay explicitly partial. No post bodies, provider
+profile emails or credentials are copied into the discovery cache. Discovery does
+not enable reactions or change action quotas. Health history tracks this source
+separately; older samples have no retroactive source-health claim.
 It does not turn other links or page instructions into actions. The worker
 persists intent and quota before writing, checks the remote state before and
 after the idempotent request, and records unavailable proof as `unverified`.

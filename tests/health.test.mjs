@@ -28,6 +28,9 @@ test('a full day of samples differs from short history, a gap, a stalled operati
   assert.equal(summarizeHealth(stalled,{now}).progressStalls,0)
   stalled.at(-1).discoveryHealthy=false
   assert.equal(summarizeHealth(stalled,{now}).unhealthySamples,1)
+  const githubFailure=structuredClone(records);githubFailure.at(-1).githubPostsHealthy=false
+  assert.equal(summarizeHealth(githubFailure,{now}).unhealthySamples,1)
+  assert.equal(summarizeHealth(githubFailure,{now}).githubPostsKnownSamples,1)
   assert.equal(summarizeHealth([...records,row(now+1000)],{now}).coverage,'invalid_history')
   assert.throws(()=>summarizeHealth(records,{hours:49}))
 })
@@ -98,4 +101,19 @@ test('unavailable diagnostic storage cannot stop discovery or reset the durable 
     assert.equal(workerStatus(directory).lock,null)
     assert.equal(readHealthReport(directory).coverage,'invalid_history')
   } finally {rmSync(directory,{recursive:true,force:true})}
+})
+
+test('an optional post source becomes unhealthy when its scheduled refresh is missed',()=>{
+  const directory=fixture();let clock=base,pulse
+  const state={jobs:{},lastError:null,lastSuccessAt:base,githubMemberPosts:{health:'ok',nextPollAt:base+60000}}
+  try {
+    const monitor=startHealthMonitor({directory,state,session:'posts',now:()=>clock,schedule:fn=>{pulse=fn;return {}},cancel:()=>{}})
+    assert.equal(readHealthReport(directory,{now:clock}).latest.githubPostsHealthy,true)
+    clock+=180001;pulse()
+    const report=readHealthReport(directory,{now:clock})
+    assert.equal(report.latest.githubPostsHealthy,false)
+    assert.equal(report.githubPostsKnownSamples,2)
+    assert.equal(report.unhealthySamples,1)
+    monitor.stop()
+  }finally{rmSync(directory,{recursive:true,force:true})}
 })

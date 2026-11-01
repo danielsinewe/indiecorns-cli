@@ -71,9 +71,18 @@ checked community repositories had no issues, so no live issue was allowlisted.
 Issue listings refresh every fifteen minutes within the existing host budgets.
 Local validation passes 92 tests and packaged startup verification.
 
+The 0.4.6 candidate adds read-only public search for recent issues authored by
+explicitly mapped Slack members. Numeric GitHub identities and current membership
+are required for author priority outside a member-owned namespace. A live isolated
+probe made four GET requests, found Daniel’s public issue in Stieges/bpmn-generator,
+and assigned verified author priority without changing the live queue or sending
+writes. Poll reservations, pagination, partial-result detection, provider limits,
+evidence expiry and credential-change recovery are tested. Optional source health
+is recorded without retroactively claiming it for older samples.
+
 ## Remaining release and validation work
 
-- Release issue discovery/reactions and verify the installed runtime, preserving
+- Release member-authored discovery and verify the installed runtime, preserving
   queue, policy, receipts, daily quota and accumulated health history.
 - Validate a real account-authorized follow when provider authentication and the
   pilot’s unchanged daily quota permit it.

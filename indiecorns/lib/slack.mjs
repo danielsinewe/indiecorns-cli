@@ -1,4 +1,5 @@
 import { boundedText, retryDelay } from './discovery.mjs'
+import { githubAuthoredMembership } from './github-member-posts.mjs'
 
 const id = (value, prefix) => typeof value === 'string' && new RegExp(`^${prefix}[A-Z0-9]+$`).test(value)
 export function validateSlackEvidence(value) {
@@ -47,13 +48,13 @@ export function slackSeedTargets(snapshot, now=Date.now()) {
 }
 export function prioritizeSlack(state, snapshot, now=Date.now()) {
   for (const job of [...Object.values(state.jobs),...Object.values(state.backlog??{})]) {
-    const evidence=slackMembership(snapshot,job.target,now)
+    const evidence=githubAuthoredMembership(state,snapshot,job.target,now)??slackMembership(snapshot,job.target,now)
     const shared=Boolean(snapshot && snapshot.observedAt<=now && snapshot.expiresAt>now &&
       job.target.slackChannelId===snapshot.channelId && snapshot.memberIds.includes(job.target.sharedBySlackUserId))
     job.slackEvidence=evidence
     job.target.slackMember=Boolean(evidence)
     job.priority=evidence?0:shared?1:2
-    job.priorityReason=evidence?(evidence.relationship==='member_project'?'verified_slack_project':'verified_slack_owner'):shared?'slack_member_shared':'community_target'
+    job.priorityReason=evidence?(evidence.relationship==='member_authored_post'?'verified_slack_author':evidence.relationship==='member_project'?'verified_slack_project':'verified_slack_owner'):shared?'slack_member_shared':'community_target'
 
   }
   state.slackHealth=!snapshot?'not_configured':snapshot.expiresAt<=now || snapshot.observedAt>now?'evidence_expired':'verified'
