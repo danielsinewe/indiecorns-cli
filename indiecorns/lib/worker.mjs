@@ -71,6 +71,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
     attachBacklog(state,directory,saveState)
     if (authRevision && state.authRevision !== authRevision) {
       state.nextPollAt = 0
+      state.discovery = {}
       state.authRevision = authRevision
     }
     if (discoveryRevision && state.discoveryRevision !== discoveryRevision && !state.lastError && !(state.retryAfterMs > 0)) state.nextPollAt = 0
@@ -79,17 +80,23 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
       if (state.nextPollAt <= now()) {
         state.retryAfterMs = 0
         try {
-          const result = await discover(signal)
+          const result = await discover(signal,state.discovery ?? {},(targets,progress)=>{
+            enqueue(state,targets,now())
+            state.discovery=progress
+            saveState(path,state)
+          })
           const targets = Array.isArray(result) ? result : result.targets
           if (!Array.isArray(targets)) throw new Error('Discovery must return targets')
           enqueue(state, targets, now())
+          if (result.progress) state.discovery=result.progress
           state.discoveryRevision = discoveryRevision
           state.sources = result.sources ?? []
           state.partial = result.partial === true
           state.retryAfterMs = result.retryAfterMs ?? 0
-          state.failures = state.partial ? state.failures + 1 : 0
+          state.failures = state.partial && !result.continuation ? state.failures + 1 : 0
+          state.continuation = result.continuation === true
           if (!state.partial) state.lastSuccessAt = now()
-          state.lastError = state.partial ? 'partial_discovery' : null
+          state.lastError = state.partial && !state.continuation ? 'partial_discovery' : null
         } catch (error) {
           if (signal?.aborted) break
           state.failures++
@@ -97,7 +104,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
           state.lastError = error.code === 'AUTH_REQUIRED' ? 'auth_required' : error.code === 'QUEUE_CAPACITY' ? 'queue_capacity' : 'discovery_failed'
         }
         state.lastPollAt = now()
-        state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
+        state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, state.continuation && !state.lastError ? Math.min(intervalMs,5000) : Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
       restoreDueJobs(state,now(),observationLimit)
       if (prioritize) {

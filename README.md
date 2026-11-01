@@ -221,7 +221,12 @@ indiecorns worker uninstall
 ```
 
 The worker polls 13 explicit profile/post/project sources across Peerlist, X,
-LinkedIn and Product Hunt using the authenticated community target endpoint. It
+LinkedIn and Product Hunt using the authenticated community target endpoint. When
+the backend supplies pagination metadata, each page and cursor are committed together.
+Each cycle reads at most two pages per source; unfinished scans continue after five
+seconds, skip completed sources, and resume after crashes or rate limits. A completed
+scan restarts from the beginning on the normal polling interval. Older backends
+still work, with full unpaginated pages reported as incomplete discovery. The worker
 persists a local
 queue in `~/.indiecorns/worker/state.json`, deduplicates targets across restarts,
 and uses exponential backoff for failed requests. SIGINT and SIGTERM release

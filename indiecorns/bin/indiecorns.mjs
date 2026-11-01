@@ -6707,14 +6707,14 @@ const main = async () => {
         const state = await runWorker({
           directory,
           authRevision: createHash("sha256").update(JSON.stringify(getCliAuthHeaders())).digest("hex"),
-          discoveryRevision: "community-13-v1",
+          discoveryRevision: "community-13-pages-v2",
           once: Boolean(flags.once),
           intervalMs: Number(flags["interval-seconds"] ?? 300) * 1000,
           signal: controller.signal,
-          discover: signal => discoverCommunity({
+          discover: (signal,progress,onPage) => discoverCommunity({
             appUrl: getAppUrl(flags),
             endpoint: getCliEndpoint("/api/public/cli/community-targets", "/api/community/action-targets"),
-            headers: getCliAuthHeaders(), signal,
+            headers: getCliAuthHeaders(), signal,progress,onPage,
           }),
           observe: (target, hosts, signal, checkpoint) => scrapeTarget({ target, hosts, signal, checkpoint }),
           prioritize: updateSlack,

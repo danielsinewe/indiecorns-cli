@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { discoverCommunity, boundedText, retryDelay } from '../indiecorns/lib/discovery.mjs'
+import { discoverCommunity, boundedText, retryDelay, discoverySourceKey, discoverySources } from '../indiecorns/lib/discovery.mjs'
+import {runWorker,workerStatus} from '../indiecorns/lib/worker.mjs'
+import {mkdtempSync,rmSync} from 'node:fs'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 
 test('discovery explicitly queries profiles, projects, posts and all four platforms', async () => {
   const queries = []
@@ -44,4 +48,72 @@ test('a full API page remains useful but cannot claim complete discovery without
   assert.equal(result.sources[0].status,'capacity_limited')
   assert.equal(result.sources[0].atCapacity,true)
   assert.equal(result.sources[1].status,'ok')
+})
+
+test('page budgets continue from durable progress and skip already-complete sources',async()=>{
+  const calls=[]
+  const options={appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async()=>{},request:async url=>{
+    calls.push(url)
+    const source=Object.fromEntries(url.searchParams)
+    if(discoverySourceKey(source)!==discoverySourceKey(discoverySources[0])) return Response.json({targets:[],pagination:{hasMore:false,nextCursor:null}})
+    const offset=Number(url.searchParams.get('cursor')??0)
+    const count=Math.min(200,401-offset)
+    return Response.json({targets:Array.from({length:count},(_,i)=>({profileUrl:`https://peerlist.io/maker${offset+i}`})),
+      pagination:{hasMore:offset+count<401,nextCursor:offset+count<401?String(offset+count):null}})
+  }}
+  const first=await discoverCommunity(options)
+  assert.equal(first.targets.length,400)
+  assert.equal(first.partial,true)
+  assert.equal(first.continuation,true)
+  assert.equal(calls.length,14)
+  assert.equal(first.progress[discoverySourceKey(discoverySources[0])].cursor,'400')
+  calls.length=0
+  const next=await discoverCommunity({...options,progress:first.progress})
+  assert.equal(next.targets.length,1)
+  assert.equal(calls.length,1)
+  assert.equal(calls[0].searchParams.get('cursor'),'400')
+  assert.equal(next.partial,false)
+  assert.deepEqual(next.progress,{})
+})
+
+test('a crash between pages cannot advance the cursor past uncommitted targets',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'indiecorns-discovery-pages-'))
+  let clock=1000,fail=true
+  const key=discoverySourceKey(discoverySources[0]),offsets=[]
+  const request=async url=>{
+    if(discoverySourceKey(Object.fromEntries(url.searchParams))!==key)return Response.json({targets:[],pagination:{hasMore:false,nextCursor:null}})
+    const cursor=url.searchParams.get('cursor')
+    offsets.push(cursor)
+    if(cursor==='200'){
+      const checkpoint=workerStatus(directory).state
+      assert.equal(Object.keys(checkpoint.jobs).length,200)
+      assert.equal(checkpoint.discovery[key].cursor,'200')
+      if(fail){fail=false;throw new Error('simulated connection failure')}
+      return Response.json({targets:[{platform:'peerlist',eventType:'follow',profileUrl:'https://peerlist.io/last'}],pagination:{hasMore:false,nextCursor:null}})
+    }
+    return Response.json({targets:Array.from({length:200},(_,i)=>({platform:'peerlist',eventType:'follow',profileUrl:`https://peerlist.io/maker${i}`})),pagination:{hasMore:true,nextCursor:'200'}})
+  }
+  const options={directory,once:true,intervalMs:1000,now:()=>clock,
+    discover:(signal,progress,onPage)=>discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},signal,progress,onPage,request,pause:async()=>{}})}
+  try {
+    const first=await runWorker(options)
+    assert.equal(first.lastError,'discovery_failed')
+    assert.equal(Object.keys(first.jobs).length,200)
+    clock=4000
+    const next=await runWorker(options)
+    assert.equal(next.lastError,null)
+    assert.equal(Object.keys(next.jobs).length,201)
+    assert.deepEqual(offsets,[null,'200','200'])
+    assert.deepEqual(next.discovery,{})
+  }finally{rmSync(directory,{recursive:true})}
+})
+
+test('repeated cursors and invalid page metadata cannot masquerade as completed discovery',async()=>{
+  for(const pagination of [{hasMore:true,nextCursor:'again'},{hasMore:false,nextCursor:'unexpected'}]){
+    const result=await discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async()=>{},
+      request:async()=>Response.json({targets:[{profileUrl:'https://peerlist.io/maker'}],pagination})})
+    assert.equal(result.partial,true)
+    assert.equal(result.continuation,false)
+    assert.ok(result.sources.every(source=>['repeated_cursor','invalid_pagination'].includes(source.status)))
+  }
 })
