@@ -302,7 +302,20 @@ external executor. Credentials can also come from `INDIECORNS_GITHUB_TOKEN` or
 mode 0600 so supervised processes can read them; it never prints their values.
 Remove a stored credential with `worker credentials --provider github --remove`.
 
-Slack priority uses `~/.indiecorns/worker/slack-evidence.json`. It contains the
+Slack priority normally comes from the authenticated community feed. Members
+without local Slack credentials need only their Indiecorns sign-in. The provider
+token stays on the community server; the feed returns fresh membership proof and
+public project/profile/post links. It excludes message bodies, media, invite links,
+signed query URLs and Slack permalinks. It uses explicit owner mappings and never
+guesses identity from a name. Provider limits, cursors and snapshot expiry persist
+on the computer just like direct Slack discovery.
+
+Existing local Slack configurations continue to work. Choose a source explicitly
+with `indiecorns worker slack source community`, `local`, or `auto`. Auto uses a
+configured local credential/snapshot pair when present, otherwise the community
+feed. Choosing community preserves stored local credentials as a fallback option.
+
+Direct Slack priority uses `~/.indiecorns/worker/slack-evidence.json`. It contains the
 workspace/channel IDs, a complete roster with observation/expiry timestamps,
 and explicit links between Slack IDs and public profile URLs. Membership lasts
 at most 24 hours. Expired or removed membership withdraws priority; matching

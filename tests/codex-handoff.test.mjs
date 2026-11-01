@@ -6,6 +6,7 @@ import { join, resolve } from "node:path"
 import test from "node:test"
 
 const cli = resolve("indiecorns/bin/indiecorns.mjs")
+const packageVersion = JSON.parse(readFileSync(new URL("../package.json",import.meta.url),"utf8")).version
 
 test("no-argument Codex runs return one concise next-step handoff", () => {
   const testHome = mkdtempSync(join(tmpdir(), "indiecorns-codex-"))
@@ -25,7 +26,7 @@ test("no-argument Codex runs return one concise next-step handoff", () => {
     const handoff = JSON.parse(output)
 
     assert.equal(handoff.mode, "codex_handoff")
-    assert.equal(handoff.version, "0.3.40")
+    assert.equal(handoff.version, packageVersion)
     assert.deepEqual(handoff.quickStart, {
       completed: 0,
       total: 4,

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 - 2026-11-01
+
+- Add supervised community workers for macOS, Linux and Windows, with durable
+  scheduling, discovery pagination, response limits, robots rules and crash recovery.
+- Prioritize verified Slack members and channel-shared projects through the
+  authenticated community feed, without requiring personal Slack API credentials.
+- Persist overflow jobs to disk, retire inactive observations, and keep external
+  action receipts so rediscovery and restarts cannot reset deduplication.
+- Generate local support briefs by default; allow opt-in GitHub stars under
+  account-bound repository allowlists, daily quotas and verified remote receipts.
+- Install permanent verified runtimes when registering a service from temporary
+  npm execution caches. Preserve machine-readable agent and onboarding interfaces.
+
 ## 0.3.40 - 2026-08-25
 
 - Detect Codex for the no-argument command and return one concise structured

@@ -161,7 +161,7 @@ export async function discoverSlackShared({snapshot:input,token,cursor='',oldest
   if(!response.ok){await response.body?.cancel();throw new Error('Slack history unavailable')}
   const data=JSON.parse(await boundedText(response))
   if(!data.ok || !Array.isArray(data.messages)) {
-    const code=['not_in_channel','missing_scope','channel_not_found','invalid_auth','token_revoked'].includes(data.error)?data.error:'history_unavailable'
+    const code=['not_in_channel','missing_scope','channel_not_found','invalid_auth','token_revoked','invalid_cursor'].includes(data.error)?data.error:'history_unavailable'
     throw Object.assign(new Error('Slack history unavailable'),{code})
   }
   if (data.has_more && !data.response_metadata?.next_cursor?.trim()) throw new Error('Slack history pagination incomplete')

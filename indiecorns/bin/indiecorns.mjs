@@ -22,6 +22,7 @@ import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
 import { prepareServiceRuntime, pruneManagedRuntimes } from "../lib/runtime.mjs"
 import { manageService } from "../lib/service.mjs"
 import { runWorker, workerStatus, enqueue, saveState } from "../lib/worker.mjs"
+import { syncCommunityFeed } from "../lib/community-feed.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -121,6 +122,7 @@ Commands:
                                  Open member targets for like, reshare, upvote, rate, or comment
   worker run [--once]            Poll community targets durably in the background
   worker status                  Inspect persisted worker queue and health
+  worker slack source <mode>     Choose auto, community, or local Slack discovery
   community-queue [platform]     Show a flat queue of community action targets
   community-open [platform]      Open queued community action targets
   community-next [platform]      Show the next community action target
@@ -6579,9 +6581,23 @@ const main = async () => {
     case "worker": {
       const directory = join(configDir, "worker")
       const slackPath = join(directory, "slack-evidence.json")
+      const slackSettingsPath = join(directory, "slack-settings.json")
+      const slackMode = () => {
+        const mode = existsSync(slackSettingsPath) ? JSON.parse(readFileSync(slackSettingsPath,"utf8")).source : "auto"
+        if (!["auto","community","local"].includes(mode)) throw new Error("Invalid Slack source")
+        return mode
+      }
       const updateSlack = async (state, signal, checkpoint) => {
         let snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath, "utf8"))) : null
-        const token = credential(directory, "slack")
+        const mode = slackMode()
+        const localToken = mode === "community" ? null : credential(directory, "slack")
+        const useCommunity = mode === "community" || (mode === "auto" && (!localToken || !snapshot))
+        const token = useCommunity ? null : localToken
+        if (useCommunity) {
+          snapshot = await syncCommunityFeed({state,signal,checkpoint,appUrl:getAppUrl(flags),
+            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:getCliAuthHeaders()})
+          state.slackSource = "community_feed"
+        } else state.slackSource = "local_slack"
         if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
           try {
             snapshot = await refreshSlackEvidence({snapshot,token,signal})
@@ -6609,6 +6625,7 @@ const main = async () => {
               if (!history.cursor) { history.oldest = history.latest; history.nextPollAt = Date.now() + 300000 }
               history.health = "ok"
             } catch (error) {
+              if (error.code === "invalid_cursor") history.cursor = ""
               history.nextPollAt = Date.now() + Math.max(60000,error.retryAfterMs ?? 300000)
               history.health = error.code ?? "history_unavailable"
             }
@@ -6617,9 +6634,16 @@ const main = async () => {
         enqueue(state, slackSeedTargets(snapshot), Date.now())
         prioritizeSlack(state, snapshot)
         state.priorityNextPollAt = token && snapshot ? Math.min(state.slackNextRefreshAt ?? Date.now(),
-          snapshot.expiresAt > Date.now() ? state.slackHistory?.nextPollAt ?? Infinity : Infinity) : undefined
+          snapshot.expiresAt > Date.now() ? state.slackHistory?.nextPollAt ?? Infinity : Infinity) : useCommunity ? state.communityFeed?.nextPollAt : undefined
       }
       if (args[0] === "slack") {
+        if (args[1] === "source") {
+          if (!args[2] || !["auto","community","local"].includes(args[2])) throw new Error("Use worker slack source auto|community|local")
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(slackSettingsPath,{source:args[2]})
+          printJson({source:slackMode()})
+          return 0
+        }
         if (args[1] === "configure") {
           const observedAt = Date.now() - 1
           const previous = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath,"utf8"))) : null
@@ -6630,9 +6654,14 @@ const main = async () => {
           mkdirSync(directory,{recursive:true,mode:0o700})
           saveState(slackPath,snapshot)
         }
-        const snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath,"utf8"))) : null
-        printJson(snapshot ? {configured:true,workspaceId:snapshot.workspaceId,channelId:snapshot.channelId,source:snapshot.source,
-          observedAt:snapshot.observedAt,expiresAt:snapshot.expiresAt,members:snapshot.memberIds.length} : {configured:false})
+        const localSnapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath,"utf8"))) : null
+        const mode = slackMode()
+        const community = mode === "community" || (mode === "auto" && (!localSnapshot || !credential(directory,"slack")))
+        const state = workerStatus(directory).state
+        const snapshot = community ? state?.communityFeed?.snapshot : localSnapshot
+        printJson(snapshot ? {configured:true,mode,workspaceId:snapshot.workspaceId,channelId:snapshot.channelId,source:community?"community_feed":snapshot.source,
+          observedAt:snapshot.observedAt,expiresAt:snapshot.expiresAt,members:snapshot.memberIds.length,
+          ...(community?{health:state.communityFeed.health}:{})} : {configured:false,mode,source:community?"community_feed":"local_slack"})
         return 0
       }
       const accountRevision = () => createHash("sha256").update(JSON.stringify({

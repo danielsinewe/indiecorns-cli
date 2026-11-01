@@ -20,7 +20,7 @@ Remaining goal requirements:
 - Extend exact public-profile mappings beyond the first verified member.
 - Add the remaining platform executors; a real GitHub action is now verified.
 - Keep startup/recovery verification passing on all three supported operating systems.
-- Release backend pagination and validate larger-scale storage usage.
+- Validate larger-scale storage usage and complete the public CLI release.
 - Publish the reviewed CLI release and verify installation outside this checkout.
 - Validate sustained unattended operation, beyond the short pilot so far.
 
@@ -73,7 +73,7 @@ after execution. The receipt records `alreadyPresent: false`. After restart the
 receipt timestamp and daily attempt count remained unchanged at one.
 
 At this inspection the live pilot has 41 targets and 35 local briefs. The code
-has 61 passing local tests. Windows startup/recovery/cleanup and permanent-runtime
+has 66 passing local tests. Windows startup/recovery/cleanup and permanent-runtime
 installation passed in three-OS CI run 41323577404 at commit a793de0. Remaining release and scale work is still open;
 this is not a claim that every platform can execute engagement actions.
 
@@ -108,8 +108,11 @@ and a five-second continuation schedule. It checkpoints targets and cursors toge
 skips sources already completed in an unfinished scan, detects repeated cursors,
 and starts fresh after completing the scan. An isolated crash-between-pages test
 verifies that restart requests the saved cursor and retains every committed target.
-The backend counterpart is being validated separately before production rollout;
-the old unpaginated API remains supported.
+The backend counterpart was merged and released in app PR #4. Authenticated
+production discovery queried all 13 sources successfully. The staged production
+build passed typecheck, 155 application tests and the application build; signed-in
+onboarding rendered successfully in the permitted ChatGPT browser. The old
+unpaginated API remains supported.
 
 A daily retention sweep now retires successfully observed targets not rediscovered
 for 30 days, old briefs belonging to retired targets and expired robots caches whose
