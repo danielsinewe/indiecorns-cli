@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.4 - 2026-11-01
+
+- Record bounded local minute-by-minute worker health during network waits and
+  scheduled backoff, without extra network requests or work-queue checkpoints.
+- Add `worker health --hours 24` to distinguish short history, gaps, stale samples,
+  expected sleep, progress stalls and unhealthy source samples. Missing or corrupt
+  evidence cannot establish a full-day run.
+
 ## 0.4.3 - 2026-11-01
 
 - Add opt-in GitHub member follows with an exact user allowlist and verified

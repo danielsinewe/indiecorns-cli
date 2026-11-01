@@ -5,6 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { attachBacklog, restoreJob, restoreDueJobs, compactJobs, backlogSchedule, dueOrder, collectBacklogGarbage } from './backlog.mjs'
 import { retainWorkerState } from './retention.mjs'
 import { acquireWorkerGuard } from './worker-lock.mjs'
+import { startHealthMonitor } from './health.mjs'
 
 const read = (path, fallback) => {
   try { return JSON.parse(readFileSync(path, 'utf8')) }
@@ -58,6 +59,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
   const lock = join(directory, 'worker.lock')
   const owner = randomUUID()
   let diagnosticOwned=false
+  let health
   const path = join(directory, 'state.json')
   try {
     // Do not overlap a pre-release worker that predates the SQLite guard. New
@@ -72,6 +74,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
     const state = read(path, { version: 1, failures: 0, nextPollAt: 0, jobs: {} })
     if (state.version !== 1 || !state.jobs) throw new Error('Unsupported worker state')
     attachBacklog(state,directory,saveState)
+    health=startHealthMonitor({directory,session:owner,state,now,onStatus:status=>{state.healthHistoryStatus=status}})
     if (authRevision && state.authRevision !== authRevision) {
       state.nextPollAt = 0
       state.discovery = {}
@@ -81,11 +84,13 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
     do {
       if (signal?.aborted) break
       if (state.nextPollAt <= now()) {
+        health.progress('discover')
         state.retryAfterMs = 0
         try {
           const result = await discover(signal,state.discovery ?? {},(targets,progress)=>{
             enqueue(state,targets,now())
             state.discovery=progress
+            health.progress('discover')
             saveState(path,state)
           })
           const targets = Array.isArray(result) ? result : result.targets
@@ -110,7 +115,8 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, state.continuation && !state.lastError ? Math.min(intervalMs,5000) : Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
       if (prioritize) {
-        try { await prioritize(state, signal, () => saveState(path, state)) }
+        health.progress('prioritize')
+        try { await prioritize(state, signal, () => {health.progress('prioritize');saveState(path, state)}) }
         catch {
           if (signal?.aborted) break
           state.slackHealth = 'source_unavailable'
@@ -135,7 +141,8 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         for (const job of due.slice(0, observationLimit)) {
           if (signal?.aborted) break
           try {
-            job.observation = await observe(job.target, state.hosts, signal, () => saveState(path, state))
+            health.progress('observe')
+            job.observation = await observe(job.target, state.hosts, signal, () => {health.progress('observe');saveState(path, state)})
             job.observationFailures = 0
             job.nextObserveAt = now() + 21600000
             job.observationError = null
@@ -149,6 +156,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         }
       }
       if (deriveTargets) {
+        health.progress('derive')
         for (const job of Object.values(state.jobs)) {
           if (job.observation?.status !== 'observed' ||
             (job.observation.observedAt && now()-job.observation.observedAt>21600000) ||
@@ -165,7 +173,8 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         .sort((a, b) => a.priority - b.priority || a.discoveredAt - b.discoveredAt).map(job => job.key)
       saveState(path, state)
       if (act && state.lastError !== 'auth_required' && !signal?.aborted) {
-        try { await act(state, signal, () => saveState(path, state)) }
+        health.progress('act')
+        try { await act(state, signal, () => {health.progress('act');saveState(path, state)}) }
         catch { state.actionHealth = 'action_configuration_failed' }
         saveState(path, state)
       }
@@ -178,19 +187,24 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         catch {state.retention.health='cleanup_deferred';state.retention.nextSweepAt=now()+3600000}
         saveState(path,state)
       }
+      health.progress('cycle')
       onCycle({ pending: state.pending.length + Object.keys(state.backlog).length, loaded:state.pending.length,
         backlog:Object.keys(state.backlog).length, lastError: state.lastError, nextPollAt: state.nextPollAt })
       if (once) return state
       const dueObservations = observe && state.lastError !== 'auth_required'
         ? [...Object.values(state.jobs).filter(job => job.status === 'queued').map(job => job.nextObserveAt ?? now()),...backlogSchedule(state)] : []
       const wakeAt = dueObservations.reduce((earliest,due)=>Math.min(earliest,due),Math.min(state.nextPollAt,state.priorityNextPollAt ?? Infinity))
+      health.progress('sleep',wakeAt)
       await sleep(Math.max(100, wakeAt - now()), undefined, {signal})
         .catch(error => { if (error.name !== 'AbortError') throw error })
     } while (!signal?.aborted)
     return state
   } finally {
-    try {if(diagnosticOwned && read(lock,null)?.owner===owner)rmSync(lock)}
-    finally {releaseGuard()}
+    try {health?.stop()}
+    finally {
+      try {if(diagnosticOwned && read(lock,null)?.owner===owner)rmSync(lock)}
+      finally {releaseGuard()}
+    }
   }
 }
 export const workerStatus = directory => ({

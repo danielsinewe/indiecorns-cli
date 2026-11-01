@@ -282,6 +282,21 @@ after moving a reused global checkout or the Node executable.
 No API key or paid model is required for polling. Sign in using `indiecorns login`
 first; missing or expired authentication is recorded as `auth_required`.
 
+`indiecorns worker health --hours 24` reports local minute-by-minute process
+samples, progress stalls, restart gaps and source health. This history starts
+when the recorder is installed; it does not reconstruct earlier uptime. Expected
+scheduled sleep is distinct from a stalled operation. `continuous_samples` means
+the requested window has samples with no gap above 90 seconds; inspect unhealthy
+samples, stops and progress stalls separately. It is not an uptime percentage or
+proof that every scrape or action succeeded.
+
+The recorder runs during network waits and backoff without making extra network
+requests. Three rotating daily files, each capped at 1 MiB, bound its disk usage.
+They contain timestamps, process/session identifiers, phase, source-health flags
+and target counts; no URLs, message bodies or credentials. Corrupt, missing or
+future-dated history is reported as unproven. Diagnostic storage failures do not
+reset the queue or stop useful work.
+
 ### Action policy and evidence
 
 The default `draft` policy creates a reusable local support brief for each

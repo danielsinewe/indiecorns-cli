@@ -42,15 +42,26 @@ An isolated public-registry installation and a real managed-service migration
 passed. The Mac service recovered after its npm cache was deleted and its process
 was forcibly terminated, retaining all 66 targets, its receipt and daily quota.
 
-The 0.4.3 candidate adds opt-in GitHub follows under a separate exact user
-allowlist, sharing the star adapter’s quota and provider cooldown. Local validation
-passes 77 tests and packaged startup verification. No follow has been executed in
-the pilot: the existing credential lacks the required provider permission, and
-the current policy enables no follows. Cross-platform CI must pass before release.
+Release 0.4.3 adds opt-in GitHub follows under a separate exact user allowlist,
+sharing the star adapter’s quota and provider cooldown. All 77 tests, packaged
+startup verification and three-OS CI passed. The pilot is running the published
+managed runtime. Its refreshed GitHub credential’s actor and follow permission
+were verified, and one exact Slack-member profile is allowlisted. No follow has
+been executed: the unchanged one-action-per-day quota was used by the earlier
+star. The next quota day begins at midnight UTC.
+
+The 0.4.4 candidate adds local minute-by-minute health samples and a
+`worker health --hours 24` report. Tests distinguish a complete sample window
+from short history, restart gaps, expected sleep, stalled progress and corrupted
+records. History is capped at three 1 MiB daily files and contains no URLs,
+messages or credentials. Local validation passes 81 tests and packaged startup.
+Real full-day evidence starts only when this recorder is installed; earlier
+status checks are not retroactively converted into uptime samples.
 
 ## Remaining release and validation work
 
-- Release the reviewed follow candidate and verify the installed runtime.
+- Release the health recorder and verify real minute samples from the installed
+  runtime while preserving the queue, policy, receipts and daily quota.
 - Validate a real account-authorized follow when provider authentication and the
   pilot’s unchanged daily quota permit it.
 - Validate sustained unattended operation beyond the pilot so far. The machine
