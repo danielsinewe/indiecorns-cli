@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
 import { githubRequest,githubJson } from './github-api.mjs'
 import { parseGithubIssue,githubIssue,githubIssueReaction } from './github-issues.mjs'
+import {producthuntUser,producthuntFollow,validProducthuntUsername,validProducthuntId} from './producthunt.mjs'
 
-export const defaultPolicy = { version:1, mode:'draft', maxExternalPerDay:5, githubRepositories:[], githubUsers:[],githubIssues:[],githubMemberActions:[] }
+export const defaultPolicy = { version:1, mode:'draft', maxExternalPerDay:5, githubRepositories:[], githubUsers:[],githubIssues:[],githubMemberActions:[],producthuntUsers:[] }
 const validGithubUser = value => typeof value==='string' && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(value) && !value.includes('--')
 export function validatePolicy(input) {
   if (input.version !== 1 || !['collect','draft','execute'].includes(input.mode) ||
@@ -16,7 +17,9 @@ export function validatePolicy(input) {
   if(!Array.isArray(issues)||issues.length>100||issues.some(issue=>!parseGithubIssue(issue)))throw new Error('Invalid GitHub issue allowlist')
   const memberActions=input.githubMemberActions??[]
   if(!Array.isArray(memberActions)||memberActions.length>2||new Set(memberActions).size!==memberActions.length||memberActions.some(kind=>!['star','follow'].includes(kind)))throw new Error('Invalid GitHub member action scope')
-  return {...input, githubRepositories:input.githubRepositories.map(repo=>repo.toLowerCase()),githubUsers:users.map(user=>user.toLowerCase()),githubIssues:issues.map(issue=>parseGithubIssue(issue).issue),githubMemberActions:memberActions}
+  const producthuntUsers=input.producthuntUsers??[]
+  if(!Array.isArray(producthuntUsers)||producthuntUsers.length>100||producthuntUsers.some(user=>!validProducthuntUsername(user)))throw new Error('Invalid Product Hunt user allowlist')
+  return {...input, githubRepositories:input.githubRepositories.map(repo=>repo.toLowerCase()),githubUsers:users.map(user=>user.toLowerCase()),githubIssues:issues.map(issue=>parseGithubIssue(issue).issue),githubMemberActions:memberActions,producthuntUsers:producthuntUsers.map(user=>user.toLowerCase())}
 }
 const digest = value => createHash('sha256').update(value).digest('hex')
 export function supportBrief(job) {
@@ -89,7 +92,8 @@ export async function githubFollow(username, options) {
   return {kind:'github_follow',username,...await githubRelationship(`following/${username}`,options)}
 }
 export async function runActions({state,policy:input=defaultPolicy,now=Date.now,checkpoint=()=>{},signal,
-  accountRevision,memberSnapshot,actorExternal=githubActor,external=githubStar,followExternal=githubFollow,reactionExternal=githubIssueReaction,token=process.env.INDIECORNS_GITHUB_TOKEN}) {
+  accountRevision,memberSnapshot,actorExternal=githubActor,external=githubStar,followExternal=githubFollow,reactionExternal=githubIssueReaction,
+  producthuntExternal=producthuntFollow,producthuntToken=process.env.INDIECORNS_PRODUCTHUNT_TOKEN,token=process.env.INDIECORNS_GITHUB_TOKEN}) {
   const policy=validatePolicy(input)
   state.actions ??= {}
   if (policy.mode==='collect') return
@@ -109,12 +113,16 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
     const repository=githubRepository(job.target)
     const username=githubUser(job.target)
     const issue=githubIssue(job.target)
+    const producthuntUsername=producthuntUser(job.target)
     let action=repository && policy.githubRepositories.includes(repository)
       ? {kind:'github_star',subject:repository,field:'repository',execute:external}
       : username && policy.githubUsers.includes(username)
         ? {kind:'github_follow',subject:username,field:'username',execute:followExternal}
         : issue && policy.githubIssues.includes(issue)
-          ? {kind:'github_issue_reaction',subject:issue,field:'issue',execute:reactionExternal}:null
+          ? {kind:'github_issue_reaction',subject:issue,field:'issue',execute:reactionExternal}
+          : producthuntUsername&&policy.producthuntUsers.includes(producthuntUsername)&&
+            producthuntUser({platform:'producthunt',eventType:job.target.eventType,profileUrl:job.observation.url})===producthuntUsername
+            ? {kind:'producthunt_follow',subject:producthuntUsername,field:'username',provider:'producthunt',execute:producthuntExternal}:null
     if(!action&&policy.mode==='execute') {
       const owner=repository?.split('/')[0]??username
       const kind=repository?'star':username?'follow':null
@@ -124,14 +132,19 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
         action=repository?{kind:'github_star',subject:repository,field:'repository',execute:external,memberOwner:owner}
           :{kind:'github_follow',subject:username,field:'username',execute:followExternal,memberOwner:owner}
     }
-    if ((state.externalNextAttemptAt ?? 0)>now() || policy.mode!=='execute' || !action) continue
+    if(policy.mode!=='execute'||!action)continue
+    const provider=action.provider??'github'
+    const providerRetry=provider==='github'?state.externalNextAttemptAt:state.providerNextAttemptAt?.[provider]
+    if((providerRetry??0)>now())continue
     const actionKey=digest(`${action.kind}:${action.subject}`)
     const previous=state.actions[actionKey]
     if (previous?.status==='completed' || (previous?.retryAt ?? 0)>now()) continue
     const day=new Date(now()).toISOString().slice(0,10)
     if (state.actionBudget?.day!==day) state.actionBudget={day,attempts:0}
     if (state.actionBudget.attempts>=policy.maxExternalPerDay) continue
-    if (!token) {state.actionHealth='github_credential_required';continue}
+    const actionToken=provider==='github'?token:producthuntToken
+    if (!actionToken) {state.actionHealth=`${provider}_credential_required`;continue}
+    if(provider==='producthunt'&&(!accountRevision||policy.accountRevision!==accountRevision)){state.actionHealth='account_policy_mismatch';continue}
     let authorization
     if(action.memberOwner) {
       if(!accountRevision||policy.accountRevision!==accountRevision){state.actionHealth='account_policy_mismatch';continue}
@@ -142,7 +155,7 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
         state.actionHealth=error.code==='GITHUB_PERMISSION_REQUIRED'?'github_permission_required':'github_actor_unverified'
         state.externalNextAttemptAt=now()+Math.max(60000,error.retryAfterMs??60000)
         checkpoint()
-        break
+        continue
       }
       // Recheck expiry after the actor read. Never auto-follow or auto-star self.
       const membership=memberEvidence(memberSnapshot,action.memberOwner,now())
@@ -159,17 +172,21 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
     state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'executing',startedAt:now(),...(authorization?{authorization}:{})}
     checkpoint()
     try {
-      const proof=await action.execute(action.subject,{token,signal,now,
+      const proof=await action.execute(action.subject,{token:actionToken,signal,now,
         ...(action.memberOwner?{authorize:()=>Boolean(memberEvidence(memberSnapshot,action.memberOwner,now()))&&actor.username.toLowerCase()!==action.memberOwner}:{})})
       if (proof?.verified!==true || proof[action.field]!==action.subject || proof.kind!==action.kind) throw new Error('Unverified action result')
       if(action.kind==='github_issue_reaction' && (proof.content!=='+1'||!Number.isSafeInteger(proof.actorId)||proof.actorId<1||!Number.isSafeInteger(proof.reactionId)||proof.reactionId<1))throw new Error('Unverified reaction receipt')
+      if(action.kind==='producthunt_follow'&&(!validProducthuntId(proof.actorId)||!validProducthuntId(proof.targetId)||proof.actorId===proof.targetId))throw new Error('Unverified Product Hunt receipt')
       state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'completed',completedAt:now(),proof,...(authorization?{authorization}:{})}
       state.actionHealth=null
     } catch (error) {
       const retryAt=now()+Math.max(3600000,error.retryAfterMs ?? 0)
-      if (error.retryAfterMs) state.externalNextAttemptAt=retryAt
+      if (error.retryAfterMs) {
+        if(provider==='github')state.externalNextAttemptAt=retryAt
+        else {state.providerNextAttemptAt??={};state.providerNextAttemptAt[provider]=retryAt}
+      }
       state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'unverified',retryAt,...(authorization?{authorization}:{})}
-      state.actionHealth=error.code==='GITHUB_PERMISSION_REQUIRED'?'github_permission_required':error.code==='MEMBER_SCOPE_EXPIRED'?'member_scope_expired':'external_action_unverified'
+      state.actionHealth=error.code==='GITHUB_PERMISSION_REQUIRED'?'github_permission_required':error.code==='PRODUCTHUNT_PERMISSION_REQUIRED'?'producthunt_permission_required':error.code==='MEMBER_SCOPE_EXPIRED'?'member_scope_expired':'external_action_unverified'
     }
     checkpoint()
   }

@@ -182,6 +182,7 @@ Options:
   --github-member-actions <list> Opt in to verified Slack-member star,follow actions
   --github-repository <repos>    Worker star allowlist, comma-separated owner/repo names
   --github-issue <issues>        Worker thumbs-up allowlist, comma-separated owner/repo#number IDs
+  --producthunt-user <users>     Worker follow allowlist, comma-separated Product Hunt usernames
   --type <event>                 External event type: follow, like, reshare, upvote, rate, comment
   --username <username>          Your external platform username
   --profile-url <url>            Your external platform profile URL
@@ -6710,6 +6711,7 @@ const main = async () => {
             ...(Object.hasOwn(flags,"github-user") ? {githubUsers:allowlist("github-user")} : {}),
             ...(Object.hasOwn(flags,"github-issue") ? {githubIssues:allowlist("github-issue")} : {}),
             ...(Object.hasOwn(flags,"github-member-actions") ? {githubMemberActions:allowlist("github-member-actions")} : {}),
+            ...(Object.hasOwn(flags,"producthunt-user") ? {producthuntUsers:allowlist("producthunt-user")} : {}),
             ...(flags["max-external-per-day"] ? {maxExternalPerDay:Number(flags["max-external-per-day"])} : {}),
           })
           mkdirSync(directory, {recursive:true,mode:0o700})
@@ -6775,7 +6777,7 @@ const main = async () => {
           prioritize: updateSlack,
           deriveTargets: memberCandidates,
           derivationRevision: "member-profile-repos-v3-issues",
-          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), accountRevision:accountRevision()}),
+          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), producthuntToken:credential(directory,"producthunt"), accountRevision:accountRevision()}),
           onCycle: printJson,
         })
         return state.lastError ? 1 : 0
