@@ -141,3 +141,12 @@ test('real CLI worker passes refreshed community evidence into member actions an
   assert.equal(fs.existsSync(path.join(directory,'worker.lock')),false)
  }finally{fs.rmSync(home,{recursive:true,force:true})}
 })
+
+test('an actor lookup crossing UTC midnight reserves the action in the new quota day',async()=>{
+ let clock=Date.UTC(2026,10,1,23,59,59),writes=0
+ const memberSnapshot={...snapshot(),observedAt:clock-1000,expiresAt:clock+3600000}
+ const s=state()
+ await runActions({...options(s),memberSnapshot,now:()=>clock,actorExternal:async()=>{clock+=2000;return actorExternal()},
+  followExternal:async(...args)=>{writes++;return followExternal(...args)},external:async(...args)=>{writes++;return external(...args)}})
+ assert.equal(writes,1);assert.deepEqual(s.actionBudget,{day:'2026-11-02',attempts:1})
+})

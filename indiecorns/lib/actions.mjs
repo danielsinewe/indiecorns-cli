@@ -151,6 +151,10 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
     }
     // Reserve quota and persist intent before writing. A restart rechecks remote
     // state before repeating this idempotent operation; it cannot replay a message.
+    // Actor verification may cross midnight; charge the day of the reservation.
+    const reservationDay=new Date(now()).toISOString().slice(0,10)
+    if(state.actionBudget.day!==reservationDay)state.actionBudget={day:reservationDay,attempts:0}
+    if(state.actionBudget.attempts>=policy.maxExternalPerDay)continue
     state.actionBudget.attempts++
     state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'executing',startedAt:now(),...(authorization?{authorization}:{})}
     checkpoint()
