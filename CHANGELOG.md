@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5 - 2026-11-01
+
+- Discover linked public GitHub issue indexes and issue posts from observed
+  repositories, preserving the distinction between project ownership and authorship.
+- Add opt-in issue thumbs-up reactions under exact issue allowlists, shared daily
+  quotas, actor-bound remote proof and idempotent crash reconciliation.
+- Allow explicit empty-list revocation and write policy changes atomically.
+
 ## 0.4.4 - 2026-11-01
 
 - Record bounded local minute-by-minute worker health during network waits and

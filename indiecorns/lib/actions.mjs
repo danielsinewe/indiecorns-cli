@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { retryDelay } from './discovery.mjs'
+import { githubRequest } from './github-api.mjs'
+import { parseGithubIssue,githubIssue,githubIssueReaction } from './github-issues.mjs'
 
-export const defaultPolicy = { version:1, mode:'draft', maxExternalPerDay:5, githubRepositories:[], githubUsers:[] }
+export const defaultPolicy = { version:1, mode:'draft', maxExternalPerDay:5, githubRepositories:[], githubUsers:[],githubIssues:[] }
 const validGithubUser = value => typeof value==='string' && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(value) && !value.includes('--')
 export function validatePolicy(input) {
   if (input.version !== 1 || !['collect','draft','execute'].includes(input.mode) ||
@@ -11,7 +12,9 @@ export function validatePolicy(input) {
   if (input.accountRevision !== undefined && !/^[a-f0-9]{64}$/.test(input.accountRevision)) throw new Error('Invalid policy account binding')
   const users=input.githubUsers??[]
   if (!Array.isArray(users) || users.length>100 || users.some(user=>!validGithubUser(user))) throw new Error('Invalid GitHub user allowlist')
-  return {...input, githubRepositories:input.githubRepositories.map(repo=>repo.toLowerCase()),githubUsers:users.map(user=>user.toLowerCase())}
+  const issues=input.githubIssues??[]
+  if(!Array.isArray(issues)||issues.length>100||issues.some(issue=>!parseGithubIssue(issue)))throw new Error('Invalid GitHub issue allowlist')
+  return {...input, githubRepositories:input.githubRepositories.map(repo=>repo.toLowerCase()),githubUsers:users.map(user=>user.toLowerCase()),githubIssues:issues.map(issue=>parseGithubIssue(issue).issue)}
 }
 const digest = value => createHash('sha256').update(value).digest('hex')
 export function supportBrief(job) {
@@ -44,25 +47,7 @@ export function githubUser(target) {
 // https://docs.github.com/en/rest/activity/starring
 // https://docs.github.com/en/rest/users/followers#follow-a-user
 async function githubRelationship(path, { token, signal, request=fetch, now=Date.now }) {
-  if (!token) throw Object.assign(new Error('GitHub credential required'),{code:'CREDENTIAL_REQUIRED'})
-  const url=`https://api.github.com/user/${path}`
-  const headers={Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2026-03-10'}
-  const call=async method=>{
-    const response=await request(url,{method,headers:{...headers,...(method==='PUT'?{'Content-Length':'0'}:{})},redirect:'error',
-      signal:AbortSignal.any([signal ?? new AbortController().signal,AbortSignal.timeout(30000)])})
-    if (response.status===429 || (response.status===403 && (response.headers.has('retry-after') || response.headers.get('x-ratelimit-remaining')==='0'))) {
-      const reset=Number(response.headers.get('x-ratelimit-reset'))*1000
-      const retryAfterMs=response.headers.has('retry-after')?retryDelay(response.headers.get('retry-after'),now())
-        : reset>now()?Math.max(1000,Math.min(reset-now(),86400000)):60000
-      await response.body?.cancel()
-      throw Object.assign(new Error('GitHub rate limited'),{retryAfterMs})
-    }
-    if ([401,403].includes(response.status)) {
-      await response.body?.cancel()
-      throw Object.assign(new Error('GitHub credential permissions required'),{code:'GITHUB_PERMISSION_REQUIRED'})
-    }
-    return response
-  }
+  const call=method=>githubRequest(`/user/${path}`,{token,signal,request,now,method})
   const before=await call('GET')
   await before.body?.cancel()
   if (before.status===204) return {verified:true,alreadyPresent:true}
@@ -84,7 +69,7 @@ export async function githubFollow(username, options) {
   return {kind:'github_follow',username,...await githubRelationship(`following/${username}`,options)}
 }
 export async function runActions({state,policy:input=defaultPolicy,now=Date.now,checkpoint=()=>{},signal,
-  accountRevision,external=githubStar,followExternal=githubFollow,token=process.env.INDIECORNS_GITHUB_TOKEN}) {
+  accountRevision,external=githubStar,followExternal=githubFollow,reactionExternal=githubIssueReaction,token=process.env.INDIECORNS_GITHUB_TOKEN}) {
   const policy=validatePolicy(input)
   state.actions ??= {}
   if (policy.mode==='collect') return
@@ -102,10 +87,13 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
     }
     const repository=githubRepository(job.target)
     const username=githubUser(job.target)
+    const issue=githubIssue(job.target)
     const action=repository && policy.githubRepositories.includes(repository)
       ? {kind:'github_star',subject:repository,field:'repository',execute:external}
       : username && policy.githubUsers.includes(username)
-        ? {kind:'github_follow',subject:username,field:'username',execute:followExternal}:null
+        ? {kind:'github_follow',subject:username,field:'username',execute:followExternal}
+        : issue && policy.githubIssues.includes(issue)
+          ? {kind:'github_issue_reaction',subject:issue,field:'issue',execute:reactionExternal}:null
     if ((state.externalNextAttemptAt ?? 0)>now() || policy.mode!=='execute' || !action) continue
     const actionKey=digest(`${action.kind}:${action.subject}`)
     const previous=state.actions[actionKey]
@@ -122,6 +110,7 @@ export async function runActions({state,policy:input=defaultPolicy,now=Date.now,
     try {
       const proof=await action.execute(action.subject,{token,signal})
       if (proof?.verified!==true || proof[action.field]!==action.subject || proof.kind!==action.kind) throw new Error('Unverified action result')
+      if(action.kind==='github_issue_reaction' && (proof.content!=='+1'||!Number.isSafeInteger(proof.actorId)||proof.actorId<1||!Number.isSafeInteger(proof.reactionId)||proof.reactionId<1))throw new Error('Unverified reaction receipt')
       state.actions[actionKey]={kind:action.kind,jobKey:job.key,status:'completed',completedAt:now(),proof}
       state.actionHealth=null
     } catch (error) {

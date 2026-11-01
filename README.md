@@ -304,23 +304,39 @@ successfully observed target. Read them with `indiecorns worker briefs`.
 Briefs contain source URLs, observed metadata and timestamps; they are not posted
 or counted as engagement. `worker policy --mode collect` disables action work.
 
-External adapters support GitHub stars and member follows, using a configured
-credential and separate exact repository/user allowlists. Execution policies bind to the current
+External adapters support GitHub stars, member follows and issue thumbs-up
+reactions, using a configured credential and separate exact repository/user/issue
+allowlists. Execution policies bind to the current
 community account and must be reconfigured after an account change:
 
 ```bash
 indiecorns worker policy --mode execute --github-repository maker/project --max-external-per-day 5
 indiecorns worker policy --mode execute --github-user maker --max-external-per-day 5
+indiecorns worker policy --mode execute --github-issue 'maker/project#12' --max-external-per-day 5
 indiecorns worker credentials --provider github --token-stdin < /secure/path/github-token
 ```
 
-This only acts on allowlisted GitHub repository or profile targets whose public
-page was observed. An existing version-1 policy without `githubUsers` permits no
-follows. Both action kinds share one daily budget and provider cooldown, and
+This only acts on allowlisted GitHub repository, profile or issue targets whose public
+page was observed. Existing version-1 policies without `githubUsers` or
+`githubIssues` permit no follows or reactions respectively. All action kinds share
+one daily budget and provider cooldown, and
 Slack-member priority determines their order. Repository links on known member
 profiles are discovered automatically. A follow needs a classic token with
 `user:follow`, or a fine-grained token with Followers read/write permissions.
 Missing permissions are reported as `github_permission_required`.
+Reactions require a public repository and exact issue ID, never a repository-wide
+permission. The adapter checks the credential's numeric actor ID and reads
+paginated reactions before and after adding `+1`; it rejects pull requests,
+private repositories and incomplete proof. A maximum of ten 100-reaction pages
+and a two-minute operation deadline bound each verification attempt. Fine-grained
+tokens need Issues read/write permission. Clear a list with `--github-issue=`
+(likewise `--github-user=` or `--github-repository=`). Policy changes are atomic.
+
+Observed repository pages can seed their linked public issue indexes and numeric
+issue posts, within the existing robots/host budgets and twenty-link page limits.
+Slack priority for a member-owned repository's issue means `verified_slack_project`;
+it does not claim that the member authored the post. Other platforms' post actions
+still produce local briefs rather than an external reaction.
 It does not turn other links or page instructions into actions. The worker
 persists intent and quota before writing, checks the remote state before and
 after the idempotent request, and records unavailable proof as `unverified`.

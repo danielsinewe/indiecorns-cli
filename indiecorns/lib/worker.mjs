@@ -6,6 +6,7 @@ import { attachBacklog, restoreJob, restoreDueJobs, compactJobs, backlogSchedule
 import { retainWorkerState } from './retention.mjs'
 import { acquireWorkerGuard } from './worker-lock.mjs'
 import { startHealthMonitor } from './health.mjs'
+import { githubIssue } from './github-issues.mjs'
 
 const read = (path, fallback) => {
   try { return JSON.parse(readFileSync(path, 'utf8')) }
@@ -34,6 +35,7 @@ export function enqueue(state, targets, now) {
       'displayName', 'profileUrl', 'targetUrl', 'source', 'discoveredFrom', 'attribution', 'sharedBySlackUserId', 'slackChannelId', 'slackMessageUrl'].flatMap(key =>
       typeof raw[key] === 'string' ? [[key, raw[key].slice(0, key.toLowerCase().includes('url') || key === 'discoveredFrom' ? 2048 : 256)]] : []))
     target.slackMember = raw.slackMember === true
+    if(githubIssue(target))target.targetType='post'
     return {key: targetKey(target), target}
   })
   for (const { key, target } of candidates) {

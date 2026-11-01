@@ -10,7 +10,8 @@ picked up during the normal unattended refresh and received owner priority.
 
 The pilot retains 66 targets, one completed GitHub-star receipt and one daily
 external-action attempt. The star was independently verified remotely. Its
-account-bound policy permits only the designated repository; this is not broad
+account-bound policy permits the designated repository and one member profile
+under the same daily quota; this is not broad
 permission to write messages or perform other platform actions.
 
 Forced termination demonstrated automatic launchd recovery without losing jobs,
@@ -37,7 +38,7 @@ This bounds loaded payloads, not total disk usage.
 Native macOS, Linux and Windows CI previously verified packaged startup, Linux
 systemd supervision, Windows Task Scheduler startup and crash recovery, and
 permanent runtime operation after removal of the npm execution cache. Release
-0.4.2 is published as npm latest through validated GitHub trusted publishing.
+0.4.2 established public npm releases through validated GitHub trusted publishing.
 An isolated public-registry installation and a real managed-service migration
 passed. The Mac service recovered after its npm cache was deleted and its process
 was forcibly terminated, retaining all 66 targets, its receipt and daily quota.
@@ -50,20 +51,33 @@ were verified, and one exact Slack-member profile is allowlisted. No follow has
 been executed: the unchanged one-action-per-day quota was used by the earlier
 star. The next quota day begins at midnight UTC.
 
-The 0.4.4 candidate adds local minute-by-minute health samples and a
+Release 0.4.4 adds local minute-by-minute health samples and a
 `worker health --hours 24` report. Tests distinguish a complete sample window
 from short history, restart gaps, expected sleep, stalled progress and corrupted
 records. History is capped at three 1 MiB daily files and contains no URLs,
-messages or credentials. Local validation passes 81 tests and packaged startup.
-Real full-day evidence starts only when this recorder is installed; earlier
-status checks are not retroactively converted into uptime samples.
+messages or credentials. All 81 tests, packaged startup and three-OS CI passed.
+The live managed service recorded its first real minute heartbeat, with queue,
+policy, receipts and quota preserved. History began at 21:12 UTC on 1 November;
+earlier status checks are not retroactively converted into uptime samples.
+
+The 0.4.5 candidate discovers linked public issue indexes and posts from observed
+GitHub repositories and adds opt-in issue thumbs-up reactions. A separate exact
+issue allowlist is required; existing policies enable none. Tests cover public
+repository/actor proof, pagination, after-write verification, receipt recovery,
+shared quota and atomic policy revocation. A live public issue-index scrape found
+twenty post candidates. A real API preflight completed four read requests with its
+write intercepted before HTTP dispatch; no reaction was sent or recorded. Three
+checked community repositories had no issues, so no live issue was allowlisted.
+Local validation passes 91 tests and packaged startup verification.
 
 ## Remaining release and validation work
 
-- Release the health recorder and verify real minute samples from the installed
-  runtime while preserving the queue, policy, receipts and daily quota.
+- Release issue discovery/reactions and verify the installed runtime, preserving
+  queue, policy, receipts, daily quota and accumulated health history.
 - Validate a real account-authorized follow when provider authentication and the
   pilot’s unchanged daily quota permit it.
+- Validate a live issue reaction when a relevant public issue and quota are
+  available; no synthetic post or engagement should substitute for that evidence.
 - Validate sustained unattended operation beyond the pilot so far. The machine
   must be awake and online; no full-day, logout or sleep-continuity claim is made.
 - Extend platform action support beyond the GitHub adapters and local

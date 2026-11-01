@@ -179,6 +179,7 @@ Options:
   --target-type <type>           External target type: profile, post, or project
   --github-user <users>          Worker follow allowlist, comma-separated GitHub usernames
   --github-repository <repos>    Worker star allowlist, comma-separated owner/repo names
+  --github-issue <issues>        Worker thumbs-up allowlist, comma-separated owner/repo#number IDs
   --type <event>                 External event type: follow, like, reshare, upvote, rate, comment
   --username <username>          Your external platform username
   --profile-url <url>            Your external platform profile URL
@@ -6692,14 +6693,19 @@ const main = async () => {
       }
       if (args[0] === "policy") {
         if (flags.mode) {
+          const allowlist = flag => {
+            if (typeof flags[flag] !== "string") throw new Error(`--${flag} requires a value; use --${flag}= to clear it`)
+            return flags[flag] === "" ? [] : flags[flag].split(",")
+          }
           const policy = validatePolicy({...readPolicy(), mode: flags.mode,
             ...(flags.mode === "execute" ? {accountRevision:accountRevision()} : {}),
-            ...(flags["github-repository"] ? {githubRepositories:String(flags["github-repository"]).split(",")} : {}),
-            ...(flags["github-user"] ? {githubUsers:String(flags["github-user"]).split(",")} : {}),
+            ...(Object.hasOwn(flags,"github-repository") ? {githubRepositories:allowlist("github-repository")} : {}),
+            ...(Object.hasOwn(flags,"github-user") ? {githubUsers:allowlist("github-user")} : {}),
+            ...(Object.hasOwn(flags,"github-issue") ? {githubIssues:allowlist("github-issue")} : {}),
             ...(flags["max-external-per-day"] ? {maxExternalPerDay:Number(flags["max-external-per-day"])} : {}),
           })
           mkdirSync(directory, {recursive:true,mode:0o700})
-          writeFileSync(policyPath, JSON.stringify(policy,null,2), {mode:0o600})
+          saveState(policyPath,policy)
         }
         printJson(readPolicy())
         return 0
@@ -6760,7 +6766,7 @@ const main = async () => {
           observe: (target, hosts, signal, checkpoint) => scrapeTarget({ target, hosts, signal, checkpoint }),
           prioritize: updateSlack,
           deriveTargets: memberCandidates,
-          derivationRevision: "member-profile-repos-v2",
+          derivationRevision: "member-profile-repos-v3-issues",
           act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), signal, checkpoint, token:credential(directory, "github"), accountRevision:accountRevision()}),
           onCycle: printJson,
         })
