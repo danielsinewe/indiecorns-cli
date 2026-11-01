@@ -73,7 +73,7 @@ after execution. The receipt records `alreadyPresent: false`. After restart the
 receipt timestamp and daily attempt count remained unchanged at one.
 
 At this inspection the live pilot has 41 targets and 35 local briefs. The code
-has 66 passing local tests. Windows startup/recovery/cleanup and permanent-runtime
+has 69 passing local tests. Windows startup/recovery/cleanup and permanent-runtime
 installation passed in three-OS CI run 41323577404 at commit a793de0. Remaining release and scale work is still open;
 this is not a claim that every platform can execute engagement actions.
 
@@ -123,3 +123,19 @@ simulate a crash before committing retirement, confirm that the previous checkpo
 can still load its cold payload, and verify that rediscovering a retired target
 does not repeat its completed external action. Legacy cold entries acquire retention
 metadata when next promoted and compacted.
+
+The authenticated shared feed is now released in app PR #5. Its staged production
+build passed typecheck, 155 application tests and nine focused handler/feed tests.
+Live reads returned eight verified human members and eight public links without a
+provider token, and unauthenticated requests returned 401. The Mac pilot now uses
+the community feed, retains all 41 targets, and preserves its completed external
+receipt and single daily attempt. Local Slack credentials remain stored privately.
+
+New multi-process tests reproduced the former PID-file weakness: deleting the PID
+metadata let a second process start while the first was still alive. A dedicated
+SQLite exclusive transaction now owns the queue; PID metadata is written atomically
+and is diagnostic. Tests cover eight simultaneous stale recoveries, lost PID metadata,
+forced-process termination, receipt/quota preservation, and a stale PID reused by
+another live process. Node 22.22 and Node 20 compatibility checks are included in CI;
+the older runtime must reject service installation before registration while keeping
+ordinary CLI commands available.

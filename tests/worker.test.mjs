@@ -46,6 +46,16 @@ test('only one worker may own a directory', async () => {
   } finally { rmSync(directory, { recursive: true }) }
 })
 
+test('a stale SQLite-owner PID cannot block recovery after that PID is reused',async()=>{
+  const directory=fixture()
+  try {
+    writeFileSync(join(directory,'worker.lock'),JSON.stringify({pid:process.pid,owner:'previous-instance',guard:'sqlite-v1'}))
+    const state=await runWorker({directory,once:true,discover:async()=>[target('recovered')]})
+    assert.equal(Object.keys(state.jobs).length,1)
+    assert.equal(workerStatus(directory).lock,null)
+  } finally {rmSync(directory,{recursive:true})}
+})
+
 test('corrupt state fails closed and releases worker ownership', async () => {
   const directory = fixture()
   try {

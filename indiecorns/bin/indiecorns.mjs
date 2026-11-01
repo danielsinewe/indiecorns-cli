@@ -23,6 +23,7 @@ import { prepareServiceRuntime, pruneManagedRuntimes } from "../lib/runtime.mjs"
 import { manageService } from "../lib/service.mjs"
 import { runWorker, workerStatus, enqueue, saveState } from "../lib/worker.mjs"
 import { syncCommunityFeed } from "../lib/community-feed.mjs"
+import { assertWorkerRuntime } from "../lib/worker-lock.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -6703,6 +6704,7 @@ const main = async () => {
         return 0
       }
       if (["install", "uninstall", "service-status"].includes(args[0])) {
+        if (args[0] === "install") assertWorkerRuntime()
         const registrationPath = join(directory, "service-runtime.json")
         const registration = existsSync(registrationPath) ? JSON.parse(readFileSync(registrationPath,"utf8")) : null
         const runtime = args[0] === "install" ? prepareServiceRuntime({cli:fileURLToPath(import.meta.url)}) : {cli:registration?.cli ?? fileURLToPath(import.meta.url)}

@@ -211,6 +211,10 @@ MIT.
 
 ## Continuous worker (development preview)
 
+Background workers require Node.js 22.22 LTS or Node.js 24+ with built-in SQLite.
+Other CLI commands retain their existing Node.js support. Worker state must stay
+on the computer's local disk.
+
 ```bash
 indiecorns worker run --once
 indiecorns worker run --interval-seconds 300
@@ -230,7 +234,10 @@ still work, with full unpaginated pages reported as incomplete discovery. The wo
 persists a local
 queue in `~/.indiecorns/worker/state.json`, deduplicates targets across restarts,
 and uses exponential backoff for failed requests. SIGINT and SIGTERM release
-ownership cleanly; a restarted process can reclaim a dead worker's lock. One
+ownership cleanly. A dedicated SQLite exclusive transaction provides process
+ownership; the OS releases it after a forced crash. The PID file is diagnostic,
+so losing it or reusing a dead worker's PID cannot admit a second worker or block
+recovery. The guard database is never deleted during startup or shutdown. One
 worker can run per local account. Requests time out after 30 seconds.
 
 Targets carrying explicit `slackMember: true` evidence are queued first.

@@ -10,6 +10,37 @@ permissions:
   contents: read
 
 jobs:
+  worker-node-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20.20.0', '22.22.0']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - run: npm ci
+      - name: Verify minimum worker runtime
+        if: matrix.node == '22.22.0'
+        run: node --test tests/worker-lock.test.mjs tests/worker.test.mjs
+      - name: Verify older CLI runtime does not register an unsupported worker
+        if: matrix.node == '20.20.0'
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawnSync} from 'node:child_process';import assert from 'node:assert/strict';
+          const directory=fs.mkdtempSync(path.join(os.tmpdir(),'indiecorns-old-node-'));
+          try {
+            const env={...process.env,HOME:directory,USERPROFILE:directory,INDIECORNS_TELEMETRY_DISABLED:'1'};
+            const help=spawnSync(process.execPath,['indiecorns/bin/indiecorns.mjs','help','--no-telemetry'],{encoding:'utf8',env});
+            assert.equal(help.status,0);
+            const install=spawnSync(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','install','--no-telemetry'],{encoding:'utf8',env});
+            assert.equal(install.status,1);assert.match(install.stderr,/require Node.js 22.22/);
+            assert.equal(fs.existsSync(path.join(directory,'.config/systemd/user/indiecorns-worker.service')),false);
+          } finally {fs.rmSync(directory,{recursive:true,force:true})}
+          JS
   package:
     timeout-minutes: 8
     defaults:

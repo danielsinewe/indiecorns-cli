@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { attachBacklog, restoreJob, restoreDueJobs, compactJobs, backlogSchedule, dueOrder, collectBacklogGarbage } from './backlog.mjs'
 import { retainWorkerState } from './retention.mjs'
+import { acquireWorkerGuard } from './worker-lock.mjs'
 
 const read = (path, fallback) => {
   try { return JSON.parse(readFileSync(path, 'utf8')) }
@@ -53,19 +54,21 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
   signal, now = Date.now, onCycle = () => {}, authRevision, discoveryRevision, observe, deriveTargets, derivationRevision = 1, act, prioritize, observationLimit = 5 }) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw new Error('Interval must be at least 1000ms')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
+  const releaseGuard=await acquireWorkerGuard(directory)
   const lock = join(directory, 'worker.lock')
-  // OS supervisors restart a crashed worker. Reclaim only a demonstrably dead PID.
-  const previous = read(lock, null)
-  if (previous) {
-    try { process.kill(previous.pid, 0); throw new Error('Worker already running') }
-    catch (error) { if (error.code !== 'ESRCH') throw error }
-    rmSync(lock)
-  }
   const owner = randomUUID()
-  const fd = openSync(lock, 'wx', 0o600)
-  writeFileSync(fd, JSON.stringify({ pid: process.pid, owner })); closeSync(fd)
+  let diagnosticOwned=false
   const path = join(directory, 'state.json')
   try {
+    // Do not overlap a pre-release worker that predates the SQLite guard. New
+    // metadata is diagnostic only; stale/reused PIDs cannot prevent recovery.
+    const previous=read(lock,null)
+    if(previous && previous.guard!=='sqlite-v1') {
+      try {process.kill(previous.pid,0);throw new Error('Worker already running')}
+      catch(error){if(error.code!=='ESRCH')throw error}
+    }
+    saveState(lock,{pid:process.pid,owner,guard:'sqlite-v1'})
+    diagnosticOwned=true
     const state = read(path, { version: 1, failures: 0, nextPollAt: 0, jobs: {} })
     if (state.version !== 1 || !state.jobs) throw new Error('Unsupported worker state')
     attachBacklog(state,directory,saveState)
@@ -185,7 +188,8 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
     } while (!signal?.aborted)
     return state
   } finally {
-    if (read(lock, null)?.owner === owner) rmSync(lock)
+    try {if(diagnosticOwned && read(lock,null)?.owner===owner)rmSync(lock)}
+    finally {releaseGuard()}
   }
 }
 export const workerStatus = directory => ({

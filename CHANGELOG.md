@@ -4,6 +4,8 @@
 
 - Add supervised community workers for macOS, Linux and Windows, with durable
   scheduling, discovery pagination, response limits, robots rules and crash recovery.
+- Use kernel-backed worker ownership through built-in SQLite; background workers
+  require Node.js 22.22 LTS or Node.js 24+. Other CLI commands retain Node.js 20 support.
 - Prioritize verified Slack members and channel-shared projects through the
   authenticated community feed, without requiring personal Slack API credentials.
 - Persist overflow jobs to disk, retire inactive observations, and keep external
