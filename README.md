@@ -316,7 +316,32 @@ indiecorns worker policy --mode execute --github-issue 'maker/project#12' --max-
 indiecorns worker credentials --provider github --token-stdin < /secure/path/github-token
 ```
 
-This only acts on allowlisted GitHub repository, profile or issue targets whose public
+For unattended support as new members and repositories appear, opt in to a
+verified Slack-member scope:
+
+```bash
+indiecorns worker policy --mode execute --github-member-actions follow,star --max-external-per-day 5
+```
+
+This permits follows of explicitly mapped, current Slack members and stars of
+their observed public repositories. It requires fresh roster evidence and an
+exact GitHub profile mapping; shared links, names, target flags and queue priority
+cannot authorize it. The credential's numeric actor ID and username are read
+before member-scoped work, and automatic actions on that account's own profile
+or repositories are skipped. Membership is checked again immediately before a
+write. Expired evidence, channel departure or a changed mapping withdraws the
+scope. Existing policies enable no member-wide actions.
+
+Member-scoped actions share the account binding, daily budget, provider cooldown
+and permanent receipts with exact allowlists. Changing between scopes does not
+replay completed actions. Issue reactions still require an exact issue allowlist.
+Member-scoped intents and receipts retain the authorizing Slack identity,
+membership timestamps, account binding and numeric GitHub actor ID.
+Select one kind with `--github-member-actions follow` or `star`, and revoke the
+scope with `--github-member-actions=` and `--mode execute`. Exact repository,
+user and issue allowlists remain independent.
+
+Exact allowlists act only on GitHub repository, profile or issue targets whose public
 page was observed. Existing version-1 policies without `githubUsers` or
 `githubIssues` permit no follows or reactions respectively. All action kinds share
 one daily budget and provider cooldown, and

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.7 - 2026-11-01
+
+- Add opt-in GitHub stars and follows for freshly verified Slack members, so
+  unattended support can include new members and repositories without individual
+  allowlist edits. Existing policies retain their exact scopes.
+- Exclude self-actions, require account binding and a verified GitHub actor, and
+  recheck membership before writing. Reuse daily quotas, cooldowns and receipts
+  across exact and member scopes. Issue reactions remain individually allowlisted.
+
 ## 0.4.6 - 2026-11-01
 
 - Discover recent public issue posts authored by explicitly mapped Slack members,

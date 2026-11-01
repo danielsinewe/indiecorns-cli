@@ -179,6 +179,7 @@ Options:
   --target-url <url>             External platform target URL being acted on
   --target-type <type>           External target type: profile, post, or project
   --github-user <users>          Worker follow allowlist, comma-separated GitHub usernames
+  --github-member-actions <list> Opt in to verified Slack-member star,follow actions
   --github-repository <repos>    Worker star allowlist, comma-separated owner/repo names
   --github-issue <issues>        Worker thumbs-up allowlist, comma-separated owner/repo#number IDs
   --type <event>                 External event type: follow, like, reshare, upvote, rate, comment
@@ -6590,12 +6591,14 @@ const main = async () => {
       const directory = join(configDir, "worker")
       const slackPath = join(directory, "slack-evidence.json")
       const slackSettingsPath = join(directory, "slack-settings.json")
+      let memberSnapshot = null
       const slackMode = () => {
         const mode = existsSync(slackSettingsPath) ? JSON.parse(readFileSync(slackSettingsPath,"utf8")).source : "auto"
         if (!["auto","community","local"].includes(mode)) throw new Error("Invalid Slack source")
         return mode
       }
       const updateSlack = async (state, signal, checkpoint) => {
+        memberSnapshot = null
         let snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath, "utf8"))) : null
         const mode = slackMode()
         const localToken = mode === "community" ? null : credential(directory, "slack")
@@ -6642,6 +6645,7 @@ const main = async () => {
         enqueue(state, slackSeedTargets(snapshot), Date.now())
         await syncGithubMemberPosts({state,snapshot,token:credential(directory,"github"),signal,checkpoint})
         prioritizeSlack(state, snapshot)
+        memberSnapshot = snapshot
         state.priorityNextPollAt = token && snapshot ? Math.min(state.slackNextRefreshAt ?? Date.now(),
           snapshot.expiresAt > Date.now() ? state.slackHistory?.nextPollAt ?? Infinity : Infinity) : useCommunity ? state.communityFeed?.nextPollAt : undefined
         state.priorityNextPollAt=Math.min(state.priorityNextPollAt??Infinity,state.githubMemberPosts?.nextPollAt??Infinity)
@@ -6705,6 +6709,7 @@ const main = async () => {
             ...(Object.hasOwn(flags,"github-repository") ? {githubRepositories:allowlist("github-repository")} : {}),
             ...(Object.hasOwn(flags,"github-user") ? {githubUsers:allowlist("github-user")} : {}),
             ...(Object.hasOwn(flags,"github-issue") ? {githubIssues:allowlist("github-issue")} : {}),
+            ...(Object.hasOwn(flags,"github-member-actions") ? {githubMemberActions:allowlist("github-member-actions")} : {}),
             ...(flags["max-external-per-day"] ? {maxExternalPerDay:Number(flags["max-external-per-day"])} : {}),
           })
           mkdirSync(directory, {recursive:true,mode:0o700})
@@ -6770,7 +6775,7 @@ const main = async () => {
           prioritize: updateSlack,
           deriveTargets: memberCandidates,
           derivationRevision: "member-profile-repos-v3-issues",
-          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), signal, checkpoint, token:credential(directory, "github"), accountRevision:accountRevision()}),
+          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), accountRevision:accountRevision()}),
           onCycle: printJson,
         })
         return state.lastError ? 1 : 0
