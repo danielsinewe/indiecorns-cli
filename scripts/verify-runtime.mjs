@@ -1,5 +1,5 @@
 import {mkdtempSync,rmSync} from 'node:fs'
-import {join} from 'node:path'
+import {join,basename} from 'node:path'
 import {tmpdir} from 'node:os'
 import {execFileSync,spawnSync} from 'node:child_process'
 import {prepareServiceRuntime} from '../indiecorns/lib/runtime.mjs'
@@ -9,7 +9,10 @@ const npm=process.env.npm_execpath
 if(!npm?.endsWith('npm-cli.js')) throw new Error('Run this check through npm run runtime:verify')
 const runNpm=(args,options={})=>execFileSync(process.execPath,[npm,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe'],...options})
 try {
-  const packed=JSON.parse(runNpm(['pack','--json','--ignore-scripts','--pack-destination',directory]))[0]
+  const report=JSON.parse(runNpm(['pack','--json','--ignore-scripts','--pack-destination',directory]))
+  // npm 12.2 keys pack reports by package name; older npm returns an array.
+  const packed=Array.isArray(report)?report[0]:report.indiecorns
+  if(typeof packed?.filename!=='string' || basename(packed.filename)!==packed.filename || !packed.filename.endsWith('.tgz'))throw new Error('Invalid npm pack report')
   const archive=join(directory,packed.filename)
   const cachePrefix=join(directory,'cache','_npx','execution')
   // Use npm for both copies: npm normalizes executable line endings on
