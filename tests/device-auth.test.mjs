@@ -11,7 +11,7 @@ const cli = resolve("indiecorns/bin/indiecorns.mjs")
 const runCli = ({ args, home }) =>
   new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
-      env: { ...process.env, HOME: home, NO_COLOR: "1" },
+      env: { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     })
     let stdout = ""
@@ -262,7 +262,7 @@ test("device-code login exchanges once and uses Bearer auth", async () => {
     const profile = await runCli({
       home,
       args: [
-        "profile", "set", "website", "--profile-url", "https://example.com",
+        "profile", "set", "website", "--no-resolve", "--profile-url", "https://example.com",
         "--json", "--no-telemetry", "--app-url", origin,
       ],
     })

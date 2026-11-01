@@ -8,11 +8,22 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { arch as osArch, homedir, platform as osPlatform } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { spawnSync } from "node:child_process"
+
+import { credential, storeCredential } from "../lib/credentials.mjs"
+import { validateSlackEvidence, slackSeedTargets, prioritizeSlack, refreshSlackEvidence, discoverSlackShared } from "../lib/slack.mjs"
+import { defaultPolicy, validatePolicy, runActions } from "../lib/actions.mjs"
+import { discoverCommunity } from "../lib/discovery.mjs"
+import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
+import { prepareServiceRuntime, pruneManagedRuntimes } from "../lib/runtime.mjs"
+import { manageService } from "../lib/service.mjs"
+import { runWorker, workerStatus, enqueue, saveState } from "../lib/worker.mjs"
+import { syncCommunityFeed } from "../lib/community-feed.mjs"
+import { assertWorkerRuntime } from "../lib/worker-lock.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -110,6 +121,9 @@ Commands:
   follow-members [platform]      Open Indiecorns member profiles to follow
   engage-members <action> [platform]
                                  Open member targets for like, reshare, upvote, rate, or comment
+  worker run [--once]            Poll community targets durably in the background
+  worker status                  Inspect persisted worker queue and health
+  worker slack source <mode>     Choose auto, community, or local Slack discovery
   community-queue [platform]     Show a flat queue of community action targets
   community-open [platform]      Open queued community action targets
   community-next [platform]      Show the next community action target
@@ -1995,7 +2009,7 @@ const resolveProfileInput = async ({
   profileUrl,
 }) => {
   const candidate = profileUrl ?? (urlLike(username) ? username : null)
-  let resolvedProfileUrl = candidate ? withProtocol(candidate) : profileUrl
+  let resolvedProfileUrl = candidate ? (safeUrl(withProtocol(candidate))?.href ?? withProtocol(candidate)) : profileUrl
   let resolvedUsername = username && !urlLike(username) ? username : null
   const resolution = {
     input: candidate ?? username ?? null,
@@ -2005,7 +2019,7 @@ const resolveProfileInput = async ({
   }
 
   if (candidate) {
-    const redirectUrl = await resolveRedirectUrl(candidate)
+    const redirectUrl = flags.resolve === false ? null : await resolveRedirectUrl(candidate)
     if (redirectUrl) {
       resolvedProfileUrl = redirectUrl
       resolution.method = "http_redirect"
@@ -6565,6 +6579,187 @@ const main = async () => {
   const flags = applyAgentMode(parsedFlags)
 
   switch (command) {
+    case "worker": {
+      const directory = join(configDir, "worker")
+      const slackPath = join(directory, "slack-evidence.json")
+      const slackSettingsPath = join(directory, "slack-settings.json")
+      const slackMode = () => {
+        const mode = existsSync(slackSettingsPath) ? JSON.parse(readFileSync(slackSettingsPath,"utf8")).source : "auto"
+        if (!["auto","community","local"].includes(mode)) throw new Error("Invalid Slack source")
+        return mode
+      }
+      const updateSlack = async (state, signal, checkpoint) => {
+        let snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath, "utf8"))) : null
+        const mode = slackMode()
+        const localToken = mode === "community" ? null : credential(directory, "slack")
+        const useCommunity = mode === "community" || (mode === "auto" && (!localToken || !snapshot))
+        const token = useCommunity ? null : localToken
+        if (useCommunity) {
+          snapshot = await syncCommunityFeed({state,signal,checkpoint,appUrl:getAppUrl(flags),
+            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:getCliAuthHeaders()})
+          state.slackSource = "community_feed"
+        } else state.slackSource = "local_slack"
+        if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
+          try {
+            snapshot = await refreshSlackEvidence({snapshot,token,signal})
+            saveState(slackPath, snapshot)
+            state.slackNextRefreshAt = Date.now() + 3600000
+            state.slackSyncError = null
+          } catch (error) {
+            state.slackNextRefreshAt = Date.now() + (error.retryAfterMs ?? 3600000)
+            state.slackSyncError = "membership_refresh_failed"
+          }
+        }
+        if (snapshot && token && snapshot.expiresAt > Date.now()) {
+          state.slackHistory ??= {oldest:"0",cursor:"",latest:"0.000000",nextPollAt:0}
+          const history = state.slackHistory
+          if (history.nextPollAt <= Date.now()) {
+            // Reserve the API interval before requesting, including across crashes.
+            history.nextPollAt = Date.now() + 60000
+            checkpoint()
+            try {
+              const result = await discoverSlackShared({snapshot,token,cursor:history.cursor,oldest:history.oldest,signal})
+              enqueue(state, result.targets, Date.now())
+              if (BigInt(result.latest.replace(".","")) > BigInt(history.latest.replace(".",""))) history.latest = result.latest
+              if (result.cursor && result.cursor === history.cursor) throw new Error("Repeated Slack history cursor")
+              history.cursor = result.cursor
+              if (!history.cursor) { history.oldest = history.latest; history.nextPollAt = Date.now() + 300000 }
+              history.health = "ok"
+            } catch (error) {
+              if (error.code === "invalid_cursor") history.cursor = ""
+              history.nextPollAt = Date.now() + Math.max(60000,error.retryAfterMs ?? 300000)
+              history.health = error.code ?? "history_unavailable"
+            }
+          }
+        }
+        enqueue(state, slackSeedTargets(snapshot), Date.now())
+        prioritizeSlack(state, snapshot)
+        state.priorityNextPollAt = token && snapshot ? Math.min(state.slackNextRefreshAt ?? Date.now(),
+          snapshot.expiresAt > Date.now() ? state.slackHistory?.nextPollAt ?? Infinity : Infinity) : useCommunity ? state.communityFeed?.nextPollAt : undefined
+      }
+      if (args[0] === "slack") {
+        if (args[1] === "source") {
+          if (!args[2] || !["auto","community","local"].includes(args[2])) throw new Error("Use worker slack source auto|community|local")
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(slackSettingsPath,{source:args[2]})
+          printJson({source:slackMode()})
+          return 0
+        }
+        if (args[1] === "configure") {
+          const observedAt = Date.now() - 1
+          const previous = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath,"utf8"))) : null
+          let snapshot = validateSlackEvidence({version:1,source:"configured",workspaceId:flags.workspace,channelId:flags.channel,
+            memberIds:[],identities:previous?.workspaceId === flags.workspace ? previous.identities : [],observedAt,expiresAt:observedAt+1})
+          const token = credential(directory, "slack")
+          if (token) snapshot = await refreshSlackEvidence({snapshot,token})
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(slackPath,snapshot)
+        }
+        const localSnapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath,"utf8"))) : null
+        const mode = slackMode()
+        const community = mode === "community" || (mode === "auto" && (!localSnapshot || !credential(directory,"slack")))
+        const state = workerStatus(directory).state
+        const snapshot = community ? state?.communityFeed?.snapshot : localSnapshot
+        printJson(snapshot ? {configured:true,mode,workspaceId:snapshot.workspaceId,channelId:snapshot.channelId,source:community?"community_feed":snapshot.source,
+          observedAt:snapshot.observedAt,expiresAt:snapshot.expiresAt,members:snapshot.memberIds.length,
+          ...(community?{health:state.communityFeed.health}:{})} : {configured:false,mode,source:community?"community_feed":"local_slack"})
+        return 0
+      }
+      const accountRevision = () => createHash("sha256").update(JSON.stringify({
+        appUrl: getAppUrl(flags),
+        account: process.env.INDIECORNS_TOKEN ? createHash("sha256").update(process.env.INDIECORNS_TOKEN).digest("hex") : readConfig().browserSession?.userId ?? readConfig().browserSession?.userEmail ?? "unauthenticated",
+      })).digest("hex")
+      const policyPath = join(directory, "policy.json")
+      const readPolicy = () => existsSync(policyPath) ? validatePolicy(JSON.parse(readFileSync(policyPath, "utf8"))) : defaultPolicy
+      if (args[0] === "credentials") {
+        const provider = flags.provider
+        if (flags.remove) printJson(storeCredential(directory, provider, null))
+        else if (flags["token-stdin"]) {
+          if (process.stdin.isTTY) throw new Error("Pipe the credential on stdin; interactive entry is disabled")
+          let token = ""
+          for await (const chunk of process.stdin) {
+            token += chunk.toString("utf8")
+            if (token.length > 16384) throw new Error("Credential exceeds size limit")
+          }
+          printJson(storeCredential(directory, provider, token.trim()))
+        } else printJson({provider,configured:Boolean(credential(directory, provider))})
+        return 0
+      }
+      if (args[0] === "policy") {
+        if (flags.mode) {
+          const policy = validatePolicy({...readPolicy(), mode: flags.mode,
+            ...(flags.mode === "execute" ? {accountRevision:accountRevision()} : {}),
+            ...(flags["github-repository"] ? {githubRepositories:String(flags["github-repository"]).split(",")} : {}),
+            ...(flags["max-external-per-day"] ? {maxExternalPerDay:Number(flags["max-external-per-day"])} : {}),
+          })
+          mkdirSync(directory, {recursive:true,mode:0o700})
+          writeFileSync(policyPath, JSON.stringify(policy,null,2), {mode:0o600})
+        }
+        printJson(readPolicy())
+        return 0
+      }
+      if (args[0] === "briefs") {
+        const state = workerStatus(directory).state
+        printJson(Object.values(state?.actions ?? {}).filter(action => action.kind === "support_brief"))
+        return 0
+      }
+      if (["install", "uninstall", "service-status"].includes(args[0])) {
+        if (args[0] === "install") assertWorkerRuntime()
+        const registrationPath = join(directory, "service-runtime.json")
+        const registration = existsSync(registrationPath) ? JSON.parse(readFileSync(registrationPath,"utf8")) : null
+        const runtime = args[0] === "install" ? prepareServiceRuntime({cli:fileURLToPath(import.meta.url)}) : {cli:registration?.cli ?? fileURLToPath(import.meta.url)}
+        const result = manageService(args[0], {
+          cli: runtime.cli,
+          node: args[0] === "install" ? process.execPath : registration?.node ?? process.execPath,
+          interval: Number(flags["interval-seconds"] ?? 300),
+        })
+        if (args[0] === "install") {
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(registrationPath,{cli:runtime.cli,node:process.execPath,managed:runtime.managed,runtimeDirectory:runtime.directory,registeredAt:Date.now()})
+          if(runtime.managed) {
+            try { pruneManagedRuntimes({active:runtime.directory,previous:registration?.runtimeDirectory}) }
+            catch { result.runtimeCleanup = "deferred" }
+          }
+        }
+        if (args[0] === "uninstall") rmSync(registrationPath,{force:true})
+        printJson(result)
+        return 0
+      }
+      if (args[0] === "status") {
+        printJson(workerStatus(directory))
+        return 0
+      }
+      if (args[0] !== "run") throw new Error("Use worker run [--once] or worker status")
+      const controller = new AbortController()
+      const stop = () => controller.abort()
+      process.once("SIGTERM", stop)
+      process.once("SIGINT", stop)
+      try {
+        const state = await runWorker({
+          directory,
+          authRevision: createHash("sha256").update(JSON.stringify(getCliAuthHeaders())).digest("hex"),
+          discoveryRevision: "community-13-pages-v2",
+          once: Boolean(flags.once),
+          intervalMs: Number(flags["interval-seconds"] ?? 300) * 1000,
+          signal: controller.signal,
+          discover: (signal,progress,onPage) => discoverCommunity({
+            appUrl: getAppUrl(flags),
+            endpoint: getCliEndpoint("/api/public/cli/community-targets", "/api/community/action-targets"),
+            headers: getCliAuthHeaders(), signal,progress,onPage,
+          }),
+          observe: (target, hosts, signal, checkpoint) => scrapeTarget({ target, hosts, signal, checkpoint }),
+          prioritize: updateSlack,
+          deriveTargets: memberCandidates,
+          derivationRevision: "member-profile-repos-v2",
+          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), signal, checkpoint, token:credential(directory, "github"), accountRevision:accountRevision()}),
+          onCycle: printJson,
+        })
+        return state.lastError ? 1 : 0
+      } finally {
+        process.removeListener("SIGTERM", stop)
+        process.removeListener("SIGINT", stop)
+      }
+    }
     case "wizard":
     case "collective":
     case "init":

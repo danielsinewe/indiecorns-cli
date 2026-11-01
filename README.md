@@ -208,3 +208,149 @@ environment files are excluded from the public tarball.
 ## License
 
 MIT.
+
+## Continuous worker (development preview)
+
+Background workers require Node.js 22.22 LTS or Node.js 24+ with built-in SQLite.
+Other CLI commands retain their existing Node.js support. Worker state must stay
+on the computer's local disk.
+
+```bash
+indiecorns worker run --once
+indiecorns worker run --interval-seconds 300
+indiecorns worker status
+indiecorns worker install
+indiecorns worker service-status
+indiecorns worker uninstall
+```
+
+The worker polls 13 explicit profile/post/project sources across Peerlist, X,
+LinkedIn and Product Hunt using the authenticated community target endpoint. When
+the backend supplies pagination metadata, each page and cursor are committed together.
+Each cycle reads at most two pages per source; unfinished scans continue after five
+seconds, skip completed sources, and resume after crashes or rate limits. A completed
+scan restarts from the beginning on the normal polling interval. Older backends
+still work, with full unpaginated pages reported as incomplete discovery. The worker
+persists a local
+queue in `~/.indiecorns/worker/state.json`, deduplicates targets across restarts,
+and uses exponential backoff for failed requests. SIGINT and SIGTERM release
+ownership cleanly. A dedicated SQLite exclusive transaction provides process
+ownership; the OS releases it after a forced crash. The PID file is diagnostic,
+so losing it or reusing a dead worker's PID cannot admit a second worker or block
+recovery. The guard database is never deleted during startup or shutdown. One
+worker can run per local account. Requests time out after 30 seconds.
+
+Targets carrying explicit `slackMember: true` evidence are queued first.
+The worker does not infer Slack membership from community registration.
+Public pages are scraped with a transparent bot user agent. The scraper checks
+robots.txt first, honors crawl delays and host cooldowns across restarts, limits
+response sizes, and connects only to validated public IPv4 addresses over HTTPS.
+It neither executes page scripts nor follows redirects implicitly. A site that
+requires browser rendering, login, or a redirect remains explicitly unresolved.
+Observations refresh every six hours independently of API discovery. Links to
+posts and projects under the same member path enter the queue with unverified
+link attribution; a link alone is not proof of authorship. The worker keeps up to
+2,000 job payloads loaded between cycles and stores overflow in a private disk-backed
+backlog. Due jobs return automatically, retaining their observation cooldowns and
+deduplication keys across restarts. `worker status` includes the backlog index;
+cycle output reports total pending, loaded and backlog counts. A daily retention
+sweep retires successfully observed targets not rediscovered for 30 days and removes
+their old local briefs. Unobserved work, unfinished external actions, completed
+external-action receipts and daily quotas are preserved. Unreferenced backlog files
+are removed only after committing state. Expired robots caches are reclaimed once
+host cooldowns have elapsed. `worker status` includes retention counts and cleanup
+health. Pending work and external receipts still consume disk as the community grows.
+Additional engagement adapters are still pending: a successful
+scrape never counts as a follow, vote, rating, comment, or completed support action.
+
+`worker install` registers a macOS launchd agent, a Linux systemd user service,
+or a Windows scheduled task with automatic recovery. These services start on user login; the computer must be
+awake and online to work. Linux operation after logout needs user lingering
+configured on the host. Windows tasks run for the logged-in user with no time
+limit, a hidden parent that restarts a failed worker after 30 seconds, a one-minute
+parent failure restart, and a five-minute recurring recovery trigger.
+A hidden PowerShell launcher keeps the worker in the background. Services discard
+stdout/stderr to prevent unbounded logs; inspect `worker status` for persisted
+health. An install started through `npx` prepares a private permanent runtime in
+`~/.indiecorns/runtime`, verifies the installed release against the invoking CLI,
+and registers that stable path. Removing npm's execution cache then leaves the
+service operational. Existing global installations and checkouts are reused.
+Successful managed updates retain the active release and one rollback release.
+Service registration records the actual CLI/Node paths so uninstall can stop a
+managed worker even when invoked from a different temporary cache. Reinstall
+after moving a reused global checkout or the Node executable.
+No API key or paid model is required for polling. Sign in using `indiecorns login`
+first; missing or expired authentication is recorded as `auth_required`.
+
+### Action policy and evidence
+
+The default `draft` policy creates a reusable local support brief for each
+successfully observed target. Read them with `indiecorns worker briefs`.
+Briefs contain source URLs, observed metadata and timestamps; they are not posted
+or counted as engagement. `worker policy --mode collect` disables action work.
+
+The first external adapter supports GitHub stars, using a configured credential
+and an exact repository allowlist. Execution policies bind to the current
+community account and must be reconfigured after an account change:
+
+```bash
+indiecorns worker policy --mode execute --github-repository maker/project --max-external-per-day 5
+indiecorns worker credentials --provider github --token-stdin < /secure/path/github-token
+```
+
+This only acts on allowlisted GitHub repository targets whose public page was
+observed. Repository links on known member profiles are discovered automatically.
+It does not turn other links or page instructions into actions. The worker
+persists intent and quota before writing, checks the remote state before and
+after the idempotent request, and records unavailable proof as `unverified`.
+Messages, comments, ratings, purchases and arbitrary shell commands have no
+external executor. Credentials can also come from `INDIECORNS_GITHUB_TOKEN` or
+`INDIECORNS_SLACK_TOKEN`. The stdin command stores credentials privately with
+mode 0600 so supervised processes can read them; it never prints their values.
+Remove a stored credential with `worker credentials --provider github --remove`.
+
+Slack priority normally comes from the authenticated community feed. Members
+without local Slack credentials need only their Indiecorns sign-in. The provider
+token stays on the community server; the feed returns fresh membership proof and
+public project/profile/post links. It excludes message bodies, media, invite links,
+signed query URLs and Slack permalinks. It uses explicit owner mappings and never
+guesses identity from a name. Provider limits, cursors and snapshot expiry persist
+on the computer just like direct Slack discovery.
+
+Existing local Slack configurations continue to work. Choose a source explicitly
+with `indiecorns worker slack source community`, `local`, or `auto`. Auto uses a
+configured local credential/snapshot pair when present, otherwise the community
+feed. Choosing community preserves stored local credentials as a fallback option.
+
+Direct Slack priority uses `~/.indiecorns/worker/slack-evidence.json`. It contains the
+workspace/channel IDs, a complete roster with observation/expiry timestamps,
+and explicit links between Slack IDs and public profile URLs. Membership lasts
+at most 24 hours. Expired or removed membership withdraws priority; matching
+names alone never establish identity. With a configured Slack credential, the
+worker verifies the workspace with `auth.test`, follows all
+`conversations.members` pages, excludes bots/deleted users with `users.info`,
+and refreshes membership hourly. Identity mappings
+must be established from member-provided links; the worker does not guess them.
+
+Configure a public Slack channel after supplying its read-only credential:
+
+```bash
+indiecorns worker credentials --provider slack --token-stdin < /secure/path/slack-token
+indiecorns worker slack configure --workspace T012ABC --channel C012DEF
+indiecorns worker slack status
+```
+
+The app needs `channels:read`, `channels:history` and `users:read`, and must be
+added to that channel. The worker reads new channel messages every five minutes
+and resumes history pagination through a saved opaque cursor. It extracts public
+links from channel messages and app notifications, including rich-text blocks,
+and stores provenance rather than message bodies. Media/file bodies are rejected
+before download. Verified
+member-owned targets come first, then links shared by members, then other
+community targets. A shared link does not establish external project ownership.
+API rate limits and pending pages retain their deadlines across restarts.
+
+The current Mac pilot has verified live API roster refresh and automatic
+channel-link discovery. The Mac pilot has completed one independently verified GitHub star through an
+exact one-repository allowlist and a one-action daily cap. The persisted receipt
+survived restart without replay; broader platform executors remain pending.
