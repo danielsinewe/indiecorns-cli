@@ -79,7 +79,7 @@ jobs:
               Start-Sleep -Seconds 3
               if (Test-Path $workerLock) { $replacementWorkerPid = (Get-Content $workerLock -Raw | ConvertFrom-Json).pid }
             }
-            if ($replacementWorkerPid -eq $originalWorkerPid) { throw "Task Scheduler did not restart the worker" }
+            if ($replacementWorkerPid -eq $originalWorkerPid) { throw "Windows supervisor did not restart the worker" }
             Get-Process -Id $replacementWorkerPid -ErrorAction Stop | Out-Null
             node indiecorns/bin/indiecorns.mjs worker service-status --no-telemetry
           } catch {
@@ -90,6 +90,8 @@ jobs:
               Get-ScheduledTaskInfo -TaskName $workerTaskName | Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List
             }
             Get-Process node, powershell -ErrorAction SilentlyContinue | Select-Object Id, ProcessName | Format-Table
+            if (Test-Path $workerLock) { Get-Content $workerLock }
+            node indiecorns/bin/indiecorns.mjs worker run --once --no-telemetry
             throw
           } finally {
             node indiecorns/bin/indiecorns.mjs worker uninstall --no-telemetry
