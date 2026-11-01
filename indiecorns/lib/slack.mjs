@@ -101,7 +101,8 @@ export async function refreshSlackEvidence({ snapshot:input,token,request=fetch,
     const candidate=new URL(auth.url)
     if (candidate.protocol==='https:' && candidate.hostname.endsWith('.slack.com') && !candidate.username && !candidate.password) workspaceUrl=candidate.origin
   }
-  const updated={...snapshot,workspaceUrl,source:'slack_web_api',memberIds:activeMembers,observedAt:now(),expiresAt:now()+86400000}
+  const observedAt=now()
+  const updated={...snapshot,workspaceUrl,source:'slack_web_api',memberIds:activeMembers,observedAt,expiresAt:observedAt+86400000}
   return validateSlackEvidence(updated)
 }
 

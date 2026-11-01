@@ -47,11 +47,13 @@ test('wrong workspace, rate limits and repeated cursors do not forge a fresh ros
 })
 
 test('Slack bots and deleted accounts are excluded from membership priority',async()=>{
-  const result=await refreshSlackEvidence({snapshot:snapshot(),token:'secret',request:async(url,options)=>Response.json(
+  let clock=1000
+  const result=await refreshSlackEvidence({snapshot:snapshot(),token:'secret',now:()=>clock++,request:async(url,options)=>Response.json(
     url.endsWith('auth.test')?{ok:true,team_id:'TTEST'}:
     url.endsWith('conversations.members')?{ok:true,members:['UMEMBER','UBOT','UDELETED']}:
     {ok:true,user:{id:new URLSearchParams(options.body).get('user'),is_bot:options.body.includes('UBOT'),deleted:options.body.includes('UDELETED')}})})
   assert.deepEqual(result.memberIds,['UMEMBER'])
+  assert.equal(result.expiresAt-result.observedAt,86400000)
 })
 
 import {sharedTargets,discoverSlackShared} from '../indiecorns/lib/slack.mjs'
