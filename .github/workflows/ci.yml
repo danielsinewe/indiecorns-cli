@@ -41,7 +41,8 @@ jobs:
             assert.equal(fs.existsSync(path.join(directory,'.config/systemd/user/indiecorns-worker.service')),false);
           } finally {fs.rmSync(directory,{recursive:true,force:true})}
           JS
-  package:
+  platform_package:
+    name: package (${{ matrix.os }})
     timeout-minutes: 8
     defaults:
       run:
@@ -135,3 +136,15 @@ jobs:
               if (Get-Process -Id $replacementWorkerPid -ErrorAction SilentlyContinue) { throw "Worker remained running after uninstall" }
             }
           }
+  package:
+    needs: [platform_package, worker-node-compatibility]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every platform and compatibility check
+        env:
+          WORKER_MATRIX_RESULT: ${{ needs.platform_package.result }}
+          WORKER_COMPAT_RESULT: ${{ needs['worker-node-compatibility'].result }}
+        run: |
+          test "$WORKER_MATRIX_RESULT" = success
+          test "$WORKER_COMPAT_RESULT" = success
