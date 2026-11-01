@@ -1,4 +1,4 @@
-import {mkdtempSync,mkdirSync,rmSync} from 'node:fs'
+import {mkdtempSync,rmSync} from 'node:fs'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {execFileSync,spawnSync} from 'node:child_process'
@@ -11,9 +11,11 @@ const runNpm=(args,options={})=>execFileSync(process.execPath,[npm,...args],{enc
 try {
   const packed=JSON.parse(runNpm(['pack','--json','--ignore-scripts','--pack-destination',directory]))[0]
   const archive=join(directory,packed.filename)
-  const cache=join(directory,'cache','_npx','execution','node_modules','indiecorns')
-  mkdirSync(cache,{recursive:true})
-  execFileSync('tar',['-xf',archive,'-C',cache,'--strip-components=1'],{stdio:'pipe'})
+  const cachePrefix=join(directory,'cache','_npx','execution')
+  // Use npm for both copies: npm normalizes executable line endings on
+  // Windows, just as it does for a real npx execution-cache installation.
+  runNpm(['install','--prefix',cachePrefix,'--ignore-scripts','--omit=dev','--no-audit','--no-fund',archive])
+  const cache=join(cachePrefix,'node_modules','indiecorns')
   const runtime=prepareServiceRuntime({home:directory,cli:join(cache,'indiecorns','bin','indiecorns.mjs'),
     install:({directory:destination})=>runNpm(['install','--prefix',destination,'--ignore-scripts','--omit=dev','--no-audit','--no-fund',archive])})
   rmSync(join(directory,'cache'),{recursive:true})
