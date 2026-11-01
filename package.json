@@ -31,7 +31,8 @@
 		"CHANGELOG.md",
 		"indiecorns/bin/indiecorns.mjs",
 		"plugins/indiecorns",
-		".agents/plugins/marketplace.json"
+		".agents/plugins/marketplace.json",
+		"indiecorns/lib"
 	],
 	"license": "MIT",
 	"engines": {

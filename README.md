@@ -208,3 +208,25 @@ environment files are excluded from the public tarball.
 ## License
 
 MIT.
+
+## Continuous worker (development preview)
+
+```bash
+indiecorns worker run --once
+indiecorns worker run --interval-seconds 300
+indiecorns worker status
+```
+
+The worker polls the authenticated community target endpoint, persists a local
+queue in `~/.indiecorns/worker/state.json`, deduplicates targets across restarts,
+and uses exponential backoff for failed requests. SIGINT and SIGTERM release
+ownership cleanly; a restarted process can reclaim a dead worker's lock. One
+worker can run per local account. Requests time out after 30 seconds.
+
+Targets carrying explicit `slackMember: true` evidence are queued first.
+The worker does not infer Slack membership from community registration.
+It currently collects targets only: it does not scrape external pages, send
+messages, execute engagement, or claim completed actions. Those adapters and
+OS service installation are still required for the full unattended workflow.
+No API key or paid model is required for polling. Sign in using `indiecorns login`
+first; missing or expired authentication is recorded as `auth_required`.

@@ -14,6 +14,8 @@ import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { spawnSync } from "node:child_process"
 
+import { runWorker, workerStatus } from "../lib/worker.mjs"
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const DEFAULT_APP_URL = "https://app.indiecorns.com"
@@ -110,6 +112,8 @@ Commands:
   follow-members [platform]      Open Indiecorns member profiles to follow
   engage-members <action> [platform]
                                  Open member targets for like, reshare, upvote, rate, or comment
+  worker run [--once]            Poll community targets durably in the background
+  worker status                  Inspect persisted worker queue and health
   community-queue [platform]     Show a flat queue of community action targets
   community-open [platform]      Open queued community action targets
   community-next [platform]      Show the next community action target
@@ -6565,6 +6569,44 @@ const main = async () => {
   const flags = applyAgentMode(parsedFlags)
 
   switch (command) {
+    case "worker": {
+      const directory = join(configDir, "worker")
+      if (args[0] === "status") {
+        printJson(workerStatus(directory))
+        return 0
+      }
+      if (args[0] !== "run") throw new Error("Use worker run [--once] or worker status")
+      const controller = new AbortController()
+      const stop = () => controller.abort()
+      process.once("SIGTERM", stop)
+      process.once("SIGINT", stop)
+      try {
+        const state = await runWorker({
+          directory,
+          once: Boolean(flags.once),
+          intervalMs: Number(flags["interval-seconds"] ?? 300) * 1000,
+          signal: controller.signal,
+          discover: async (signal) => {
+            const headers = getCliAuthHeaders()
+            if (!headers) throw Object.assign(new Error("Login required"), { code: "AUTH_REQUIRED" })
+            const endpoint = getCliEndpoint("/api/public/cli/community-targets", "/api/community/action-targets")
+            const response = await fetch(`${getAppUrl(flags)}${endpoint}?limit=100`, {
+              headers, signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
+              redirect: "error",
+            })
+            if ([401, 403].includes(response.status)) throw Object.assign(new Error("Login required"), { code: "AUTH_REQUIRED" })
+            if (!response.ok) throw new Error("Discovery failed")
+            const body = await response.json()
+            return body.targets
+          },
+          onCycle: printJson,
+        })
+        return state.lastError ? 1 : 0
+      } finally {
+        process.removeListener("SIGTERM", stop)
+        process.removeListener("SIGINT", stop)
+      }
+    }
     case "wizard":
     case "collective":
     case "init":
