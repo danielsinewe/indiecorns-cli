@@ -65,3 +65,15 @@ test('shutdown interrupts the scheduled sleep', async () => {
     assert.equal(workerStatus(directory).lock, null)
   } finally { rmSync(directory, { recursive: true }) }
 })
+
+test('new credentials bypass old authentication backoff without resetting jobs', async () => {
+  const directory = fixture()
+  try {
+    await runWorker({ directory, once: true, now: () => 1000, authRevision: 'old',
+      discover: async () => { throw Object.assign(new Error(), { code: 'AUTH_REQUIRED' }) } })
+    const state = await runWorker({ directory, once: true, now: () => 1100, authRevision: 'new',
+      discover: async () => [target('authenticated')] })
+    assert.equal(state.lastError, null)
+    assert.equal(state.pending.length, 1)
+  } finally { rmSync(directory, { recursive: true }) }
+})

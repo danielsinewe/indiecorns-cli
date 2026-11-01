@@ -8,12 +8,13 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { arch as osArch, homedir, platform as osPlatform } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { spawnSync } from "node:child_process"
 
+import { manageService } from "../lib/service.mjs"
 import { runWorker, workerStatus } from "../lib/worker.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -6571,6 +6572,13 @@ const main = async () => {
   switch (command) {
     case "worker": {
       const directory = join(configDir, "worker")
+      if (["install", "uninstall", "service-status"].includes(args[0])) {
+        printJson(manageService(args[0], {
+          cli: fileURLToPath(import.meta.url),
+          interval: Number(flags["interval-seconds"] ?? 300),
+        }))
+        return 0
+      }
       if (args[0] === "status") {
         printJson(workerStatus(directory))
         return 0
@@ -6583,6 +6591,7 @@ const main = async () => {
       try {
         const state = await runWorker({
           directory,
+          authRevision: createHash("sha256").update(JSON.stringify(getCliAuthHeaders())).digest("hex"),
           once: Boolean(flags.once),
           intervalMs: Number(flags["interval-seconds"] ?? 300) * 1000,
           signal: controller.signal,

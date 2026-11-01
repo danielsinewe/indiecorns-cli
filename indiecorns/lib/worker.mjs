@@ -33,7 +33,7 @@ export function enqueue(state, targets, now) {
   }
 }
 export async function runWorker({ directory, discover, once = false, intervalMs = 300000,
-  signal, now = Date.now, onCycle = () => {} }) {
+  signal, now = Date.now, onCycle = () => {}, authRevision }) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw new Error('Interval must be at least 1000ms')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const lock = join(directory, 'worker.lock')
@@ -51,6 +51,10 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
   try {
     const state = read(path, { version: 1, failures: 0, nextPollAt: 0, jobs: {} })
     if (state.version !== 1 || !state.jobs) throw new Error('Unsupported worker state')
+    if (authRevision && state.authRevision !== authRevision) {
+      state.nextPollAt = 0
+      state.authRevision = authRevision
+    }
     do {
       if (signal?.aborted) break
       const delay = Math.max(0, state.nextPollAt - now())

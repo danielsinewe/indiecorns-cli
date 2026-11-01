@@ -215,6 +215,9 @@ MIT.
 indiecorns worker run --once
 indiecorns worker run --interval-seconds 300
 indiecorns worker status
+indiecorns worker install
+indiecorns worker service-status
+indiecorns worker uninstall
 ```
 
 The worker polls the authenticated community target endpoint, persists a local
@@ -226,7 +229,12 @@ worker can run per local account. Requests time out after 30 seconds.
 Targets carrying explicit `slackMember: true` evidence are queued first.
 The worker does not infer Slack membership from community registration.
 It currently collects targets only: it does not scrape external pages, send
-messages, execute engagement, or claim completed actions. Those adapters and
-OS service installation are still required for the full unattended workflow.
+messages, execute engagement, or claim completed actions. External discovery, scraping, and action adapters are still required for the full
+unattended workflow. `worker install` registers a macOS launchd agent or a Linux
+systemd user service with automatic restart. These services start on user login;
+the computer must be awake and online to work. Linux operation after logout needs
+user lingering configured on the host. Windows service installation is pending.
+Services discard stdout/stderr to prevent unbounded logs; inspect `worker status`
+for persisted health. Reinstall after moving the CLI or Node executable.
 No API key or paid model is required for polling. Sign in using `indiecorns login`
 first; missing or expired authentication is recorded as `auth_required`.
