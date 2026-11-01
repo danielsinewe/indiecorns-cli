@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 - 2026-11-01
+
+- Apply fresh Slack membership to archived jobs before selecting observations,
+  including newly mapped owners, expired rosters and member-shared links.
+- Upgrade existing backlog indexes without loading all archived payloads at once.
+
 ## 0.4.1 - 2026-11-01
 
 - Accept npm 12.2's package-keyed JSON report in permanent-runtime installation

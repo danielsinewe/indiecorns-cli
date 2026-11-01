@@ -1,141 +1,55 @@
 # Continuous worker pilot — 1 November 2026
 
-An authenticated macOS launchd pilot is running from this checkout. OS process
-inspection confirmed a live service. A forced process termination was followed
-by automatic restart and recovery of the persisted queue.
+## Current verified behavior
 
-The expanded discovery cycle successfully queried all 13 configured sources
-across Peerlist, X, LinkedIn and Product Hunt. The API supplied one profile and
-no post or project targets during this cycle. Public-page scraping of that
-profile independently found two member-path project links. Both project pages
-were then scraped automatically. Three observations are persisted locally;
-none was recorded as a completed engagement or verified authorship claim.
+Daniel’s authenticated macOS launchd service continuously discovers community
+profiles, projects and posts, scrapes public pages, and creates local support
+briefs. The shared community feed verifies eight active human Slack members.
+Two exact member mappings cover four public profiles; newly mapped targets were
+picked up during the normal unattended refresh and received owner priority.
 
-Tests cover source selection, Retry-After persistence, bounded responses,
-robots denial, crawl delays, host cooldowns, public-address restrictions,
-metadata parsing, attribution, crash recovery, ownership, corrupt-state handling,
-deduplication, independent observation scheduling, and service configuration.
+The pilot retains 43 targets, one completed GitHub-star receipt and one daily
+external-action attempt. The star was independently verified remotely. Its
+account-bound policy permits only the designated repository; this is not broad
+permission to write messages or perform other platform actions.
 
-Remaining goal requirements:
-- Extend exact public-profile mappings beyond the first verified member.
-- Add the remaining platform executors; a real GitHub action is now verified.
-- Keep startup/recovery verification passing on all three supported operating systems.
-- Validate larger-scale storage usage and complete the public CLI release.
-- Publish the reviewed CLI release and verify installation outside this checkout.
-- Validate sustained unattended operation, beyond the short pilot so far.
+Forced termination demonstrated automatic launchd recovery without losing jobs,
+action receipts or quota. SQLite holds exclusive worker ownership independently
+of PID metadata and releases ownership when the process dies. Concurrent-process
+tests cover stale recovery and lost metadata. Supported worker runtimes are
+Node.js 22.22 LTS or Node.js 24+; ordinary CLI commands also support Node.js 20.
 
-A desktop computer must be awake and online for local workers to run. The pilot
-has not established continuous operation through sleep, logout, or a full day.
+## Discovery, storage and distribution
 
-The ChatGPT in-app browser subsequently verified all eight members of the
-community channel. One member's explicit project link was mapped to their Slack
-identity. The worker prioritized and observed that project and now maintains four
-local support briefs. The private roster expires after 24 hours; no read-capable
-Slack Web API credential is configured yet. The implementation supports paginated,
-workspace-verified refresh when credentials are supplied.
+All 13 configured API discovery sources completed authenticated production reads.
+Both backend handlers support bounded pagination. The shared Slack feed is live
+on app.indiecorns.com; Slack provider credentials remain on the server. Public
+scraping respects robots rules and host delays, rejects private network addresses,
+and bounds response sizes. API errors and cooldowns persist across restarts.
 
-An opt-in GitHub-star adapter now reserves quota before execution and verifies
-remote state before/after idempotent writes. It has passed mocked API and replay
-tests; the live pilot has made no external engagement writes. Default actions
-only create local evidence briefs. CI now runs the full suite on macOS, Linux
-and Windows and has verified real Linux systemd supervision on its Linux runner.
+At most 2,000 job payloads remain loaded after each cycle. Overflow payloads stay
+on disk with a durable scheduling index. Current Slack membership applies to both
+loaded and archived jobs before observation selection. Existing indexes are
+upgraded one payload at a time. Thirty-day retention retires inactive successful
+observations while preserving pending work and external-action receipts.
+This bounds loaded payloads, not total disk usage.
 
-Windows Task Scheduler support now includes per-user identity, hidden execution,
-login/recurring triggers, no runtime limit, and crash restart. CI checks out the
-repository into a path containing spaces on all operating systems and adds an
-actual Windows scheduled-start/forced-crash test. This checkpoint does not yet
-claim that the Windows supervision test has passed.
+Native macOS, Linux and Windows CI previously verified packaged startup, Linux
+systemd supervision, Windows Task Scheduler startup and crash recovery, and
+permanent runtime operation after removal of the npm execution cache. The current
+0.4.2 candidate adds archived-priority regression coverage. Local validation passes
+72 tests, smoke/pack checks and packaged runtime verification. Cross-platform CI
+must pass for this candidate before it is merged.
 
-Subsequent verification: Windows Task Scheduler startup and forced worker crash
-recovery passed in CI run 41320012015 at commit 89328c0, together with the macOS
-and Linux checks. The launcher supervises child exits directly every 30 seconds;
-Task Scheduler separately recovers parent exits. No Mac restart was needed for
-these Windows-only changes.
+## Remaining release and validation work
 
-The existing community Slack app was authorized for three read-only scopes and
-added to the configured community channel. Its credential is stored privately,
-not in the repository. Live API roster verification returned eight active human
-members. The running Mac worker independently refreshed that roster and scheduled
-its next refresh. A live channel-history read found 11 shared links across five
-platform types. The worker now has 14 deduplicated targets and has produced eight
-local briefs at the latest inspection. Shared-link priority does not assert that
-the sharing member owns the linked external project. Message bodies are not
-persisted. External engagement has still not been executed in the pilot.
-
-The member's publicly published GitHub profile was explicitly linked from the
-already mapped public community profile. The worker seeded that known profile,
-read its public repository links, and automatically discovered six repositories.
-One exact repository was allowlisted with an execution policy bound to the current
-community account and a one-action daily cap. The worker observed the repository,
-checked that it was not already starred, performed the star, and verified it.
-An independent authenticated GitHub read changed from 404 before execution to 204
-after execution. The receipt records `alreadyPresent: false`. After restart the
-receipt timestamp and daily attempt count remained unchanged at one.
-
-At this inspection the live pilot has 41 targets and 35 local briefs. The code
-has 69 passing local tests. Windows startup/recovery/cleanup and permanent-runtime
-installation passed in three-OS CI run 41323577404 at commit a793de0. Remaining release and scale work is still open;
-this is not a claim that every platform can execute engagement actions.
-
-The background installer now avoids disposable npm execution-cache paths. It
-verifies and installs an exact published CLI release into a private versioned
-runtime when invoked from `npx`, while reusing global installs and checkouts.
-Registration stores the real executable paths for later uninstall, and cleanup
-retains the active release plus one rollback release. A real packaged npm install
-was exercised in an isolated temporary home: after deleting the execution cache,
-the permanent packaged CLI still imported its dependencies, started its worker,
-persisted the expected authentication-required state, and released its lock. All temporary test files were removed. This package-level check
-is also part of three-OS CI; public-registry release verification is still pending.
-
-The former 2,000-target admission failure is replaced by a durable payload backlog.
-An isolated 2,050-target test accepts the whole batch, observes a Slack member first,
-then repeatedly restarts and rediscovers the batch without resetting observation
-cooldowns or losing targets. Each completed cycle leaves at most 2,000 loaded jobs.
-Cold payloads are atomically written before the state index is committed and retained
-after promotion, so the previously committed state can still recover after a crash.
-Missing payloads fail closed while preserving the committed index and action receipts.
-This bounds loaded job payloads, not total disk consumption: pending work and
-external-action receipts remain durable as the community grows.
-
-An authenticated read of the live community API confirmed its response currently
-contains only platform, eventType, targetSource and targets, without a cursor,
-total or hasMore field. Full 200-target pages are now classified capacity_limited
-and partial, rather than falsely claiming complete discovery. Their targets still
-enter the queue; reaching subsequent pages requires backend pagination support.
-
-The CLI now consumes backend pagination metadata with a two-page budget per source
-and a five-second continuation schedule. It checkpoints targets and cursors together,
-skips sources already completed in an unfinished scan, detects repeated cursors,
-and starts fresh after completing the scan. An isolated crash-between-pages test
-verifies that restart requests the saved cursor and retains every committed target.
-The backend counterpart was merged and released in app PR #4. Authenticated
-production discovery queried all 13 sources successfully. The staged production
-build passed typecheck, 155 application tests and the application build; signed-in
-onboarding rendered successfully in the permitted ChatGPT browser. The old
-unpaginated API remains supported.
-
-A daily retention sweep now retires successfully observed targets not rediscovered
-for 30 days, old briefs belonging to retired targets and expired robots caches whose
-host delay has elapsed. It preserves unobserved work, unfinished external actions,
-external-action receipts and quota history. Payload collection runs only after the
-state checkpoint commits; failures are classified and retried after an hour. Tests
-simulate a crash before committing retirement, confirm that the previous checkpoint
-can still load its cold payload, and verify that rediscovering a retired target
-does not repeat its completed external action. Legacy cold entries acquire retention
-metadata when next promoted and compacted.
-
-The authenticated shared feed is now released in app PR #5. Its staged production
-build passed typecheck, 155 application tests and nine focused handler/feed tests.
-Live reads returned eight verified human members and eight public links without a
-provider token, and unauthenticated requests returned 401. The Mac pilot now uses
-the community feed, retains all 41 targets, and preserves its completed external
-receipt and single daily attempt. Local Slack credentials remain stored privately.
-
-New multi-process tests reproduced the former PID-file weakness: deleting the PID
-metadata let a second process start while the first was still alive. A dedicated
-SQLite exclusive transaction now owns the queue; PID metadata is written atomically
-and is diagnostic. Tests cover eight simultaneous stale recoveries, lost PID metadata,
-forced-process termination, receipt/quota preservation, and a stale PID reused by
-another live process. Node 22.22 and Node 20 compatibility checks are included in CI;
-the older runtime must reject service installation before registration while keeping
-ordinary CLI commands available.
+- Publish the reviewed candidate and verify installation from the public npm
+  registry outside this checkout. npm requires password/security-key
+  reauthentication; both available publishing paths failed authentication.
+- Switch the Mac pilot from its checkout to the verified published runtime.
+- Validate sustained unattended operation beyond the pilot so far. The machine
+  must be awake and online; no full-day, logout or sleep-continuity claim is made.
+- Extend platform action support beyond the current GitHub-star adapter and local
+  briefs. Other platforms’ engagement actions are not implemented by this worker.
+- Continue validating storage growth as community volume increases; durable
+  pending work and receipts deliberately have no automatic hard disk quota.

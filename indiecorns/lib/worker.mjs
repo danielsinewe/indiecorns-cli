@@ -109,14 +109,13 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         state.lastPollAt = now()
         state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, state.continuation && !state.lastError ? Math.min(intervalMs,5000) : Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
-      restoreDueJobs(state,now(),observationLimit)
       if (prioritize) {
         try { await prioritize(state, signal, () => saveState(path, state)) }
         catch {
           if (signal?.aborted) break
           state.slackHealth = 'source_unavailable'
           state.priorityNextPollAt = now() + 300000
-          for (const job of Object.values(state.jobs)) {
+          for (const job of [...Object.values(state.jobs),...Object.values(state.backlog)]) {
             job.target.slackMember = false
             job.slackEvidence = null
             job.priority = 2
@@ -124,6 +123,8 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
           }
         }
       }
+      // Select cold work using the current roster, including newly mapped owners.
+      restoreDueJobs(state,now(),observationLimit)
       state.pending = Object.values(state.jobs).filter(job => job.status === 'queued')
         .sort((a, b) => a.priority - b.priority || a.discoveredAt - b.discoveredAt).map(job => job.key)
       // Save discovery and scheduling before any outbound page request.

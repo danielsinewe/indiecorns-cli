@@ -45,7 +45,7 @@ export function slackSeedTargets(snapshot, now=Date.now()) {
     .filter(target=>slackMembership(snapshot,target,now)).map(target=>({...target,slackMember:true,source:target.source ?? 'slack_member_shared'}))
 }
 export function prioritizeSlack(state, snapshot, now=Date.now()) {
-  for (const job of Object.values(state.jobs)) {
+  for (const job of [...Object.values(state.jobs),...Object.values(state.backlog??{})]) {
     const evidence=slackMembership(snapshot,job.target,now)
     const shared=Boolean(snapshot && snapshot.observedAt<=now && snapshot.expiresAt>now &&
       job.target.slackChannelId===snapshot.channelId && snapshot.memberIds.includes(job.target.sharedBySlackUserId))
