@@ -121,9 +121,13 @@ async function setup({directory,appUrl,headers,accountRevision,mode='draft',chec
     step('service',started.running?'running':'starting',{...(started.running?{pid:started.pid}:{}),nextCommand:'indiecorns worker setup --check'})
   }
   const running=result.steps.some(s=>s.id==='service'&&s.status==='running')
-  result.state=running?(policy.mode==='execute'&&!githubVerified?'running_with_action_requirements':'ready'):check?'setup_required':'action_required'
+  const credentialNeedsSaving=githubVerified&&token!==credential(directory,'github',{})
+  result.state=check&&(!existing||credentialNeedsSaving)?'setup_required':
+    running?(policy.mode==='execute'&&!githubVerified?'running_with_action_requirements':'ready'):check?'setup_required':'action_required'
+  if(check&&credentialNeedsSaving)step('background_credential','save_required',{nextCommand:`indiecorns worker setup --mode ${policy.mode}`})
   result.capabilities={discovery:true,slackPriority:true,githubActions:policy.mode==='execute'&&githubVerified,
     producthuntActions:false,otherPlatformActions:false}
-  result.nextCommand=result.state==='ready'?'indiecorns worker health --hours 24':'indiecorns worker setup --check'
+  result.nextCommand=result.state==='ready'?'indiecorns worker health --hours 24':
+    result.state==='setup_required'?`indiecorns worker setup --mode ${policy.mode}`:'indiecorns worker setup --check'
   return result
 }
