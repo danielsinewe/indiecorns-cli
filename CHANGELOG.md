@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.10 - 2026-11-02
+
+- Bound worker data writes to 128 MiB by default, counting atomic replacement
+  peaks and reserving room for health/control records. Capacity failures preserve
+  pending work, receipts and action quotas; no remote action can start without a
+  committed intent. Failed atomic writes clean up their temporary files.
+- Add `worker storage` diagnostics and an explicit 16–512 MiB disk budget setting,
+  independent of action policy and honored during supervised recovery.
+
 ## 0.4.9 - 2026-11-02
 
 - Add resumable `worker setup --mode execute` for shared Slack-feed onboarding,
