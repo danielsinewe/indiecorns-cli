@@ -306,7 +306,26 @@ their old local briefs. Unobserved work, unfinished external actions, completed
 external-action receipts and daily quotas are preserved. Unreferenced backlog files
 are removed only after committing state. Expired robots caches are reclaimed once
 host cooldowns have elapsed. `worker status` includes retention counts and cleanup
-health. Pending work and external receipts still consume disk as the community grows.
+health. The worker data directory has a default **128 MiB storage budget**, with
+4 MiB reserved for bounded health/control files. Atomic writes count both the old
+checkpoint and its temporary replacement. If another checkpoint or cold payload
+would exceed the budget, the worker fails closed, records `storage.health` as
+`capacity_reached`, and preserves the last committed queue, receipts and action
+budget. A provider action cannot begin when its intent cannot be committed.
+Supervision retries startup; it does not delete work or expand the limit.
+Incomplete temporary writes are removed on failure. Budgeting covers worker data,
+not the separate Node/npm installation or managed package runtime.
+
+```bash
+indiecorns worker storage
+indiecorns worker storage --max-mib 256
+```
+
+An explicit disk budget between 16 and 512 MiB takes effect on subsequent writes,
+including supervised recovery. Check available space before increasing it.
+Changing storage limits never changes the daily action cap. Pending work and
+external receipts are never evicted to make room. Storage capacity therefore
+requires attention when retained data reaches its configured bound.
 Additional engagement adapters are still pending: a successful
 scrape never counts as a follow, vote, rating, comment, or completed support action.
 

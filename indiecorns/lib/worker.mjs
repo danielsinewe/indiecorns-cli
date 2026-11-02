@@ -7,6 +7,7 @@ import { retainWorkerState } from './retention.mjs'
 import { acquireWorkerGuard } from './worker-lock.mjs'
 import { startHealthMonitor } from './health.mjs'
 import { githubIssue } from './github-issues.mjs'
+import {configureStorageBudget,reserveStorageWrite} from './storage.mjs'
 
 const read = (path, fallback) => {
   try { return JSON.parse(readFileSync(path, 'utf8')) }
@@ -14,11 +15,16 @@ const read = (path, fallback) => {
 }
 // A corrupted state must never silently reset deduplication or action history.
 export function saveState(path, state) {
+  const contents=JSON.stringify(state)
+  const committed=reserveStorageWrite(path,Buffer.byteLength(contents))
   const temporary = `${path}.${randomUUID()}.tmp`
-  const fd = openSync(temporary, 'wx', 0o600)
-  try { writeFileSync(fd, JSON.stringify(state)); fsyncSync(fd) }
-  finally { closeSync(fd) }
-  renameSync(temporary, path)
+  try {
+    const fd = openSync(temporary, 'wx', 0o600)
+    try { writeFileSync(fd, contents); fsyncSync(fd) }
+    finally { closeSync(fd) }
+    renameSync(temporary, path)
+    committed()
+  }finally{rmSync(temporary,{force:true})}
 }
 export function targetKey(target) {
   const url = new URL(target.profileUrl ?? target.targetUrl)
@@ -58,12 +64,15 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw new Error('Interval must be at least 1000ms')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const releaseGuard=await acquireWorkerGuard(directory)
+  let releaseBudget=()=>{}
   const lock = join(directory, 'worker.lock')
   const owner = randomUUID()
   let diagnosticOwned=false
   let health
+  let state
   const path = join(directory, 'state.json')
   try {
+    releaseBudget=configureStorageBudget(directory)
     // Do not overlap a pre-release worker that predates the SQLite guard. New
     // metadata is diagnostic only; stale/reused PIDs cannot prevent recovery.
     const previous=read(lock,null)
@@ -73,7 +82,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
     }
     saveState(lock,{pid:process.pid,owner,guard:'sqlite-v1'})
     diagnosticOwned=true
-    const state = read(path, { version: 1, failures: 0, nextPollAt: 0, jobs: {} })
+    state = read(path, { version: 1, failures: 0, nextPollAt: 0, jobs: {} })
     if (state.version !== 1 || !state.jobs) throw new Error('Unsupported worker state')
     attachBacklog(state,directory,saveState)
     health=startHealthMonitor({directory,session:owner,state,now,onStatus:status=>{state.healthHistoryStatus=status}})
@@ -201,7 +210,11 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         .catch(error => { if (error.name !== 'AbortError') throw error })
     } while (!signal?.aborted)
     return state
+  } catch(error) {
+    if(error.code==='STORAGE_CAPACITY'&&state)state.lastError='storage_capacity'
+    throw error
   } finally {
+    releaseBudget()
     try {health?.stop()}
     finally {
       try {if(diagnosticOwned && read(lock,null)?.owner===owner)rmSync(lock)}
@@ -212,4 +225,5 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
 export const workerStatus = directory => ({
   lock: read(join(directory, 'worker.lock'), null),
   state: read(join(directory, 'state.json'), null),
+  storage: read(join(directory,'storage-health.json'),null),
 })

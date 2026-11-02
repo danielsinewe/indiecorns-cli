@@ -28,6 +28,7 @@ import { assertWorkerRuntime } from "../lib/worker-lock.mjs"
 import { readHealthReport } from "../lib/health.mjs"
 import { syncGithubMemberPosts } from "../lib/github-member-posts.mjs"
 import { setupWorker } from "../lib/onboarding.mjs"
+import {storageSettings,directoryBytes} from "../lib/storage.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -128,6 +129,7 @@ Commands:
   worker run [--once]            Poll community targets durably in the background
   worker setup [--mode execute]  Configure Slack priority, GitHub and background startup
   worker setup --check           Read-only onboarding and service diagnosis
+  worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
   worker policy                  Show action policy; configure exact GitHub targets
@@ -6693,6 +6695,16 @@ const main = async () => {
       })).digest("hex")
       const policyPath = join(directory, "policy.json")
       const readPolicy = () => existsSync(policyPath) ? validatePolicy(JSON.parse(readFileSync(policyPath, "utf8"))) : defaultPolicy
+      if(args[0]==="storage") {
+        if(Object.hasOwn(flags,"max-mib")) {
+          const mib=Number(flags["max-mib"])
+          if(!Number.isInteger(mib)||mib<16||mib>512)throw new Error("Storage budget must be between 16 and 512 MiB")
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(join(directory,"storage-settings.json"),{version:1,maximumBytes:mib*1024*1024})
+        }
+        printJson({...storageSettings(directory),usedBytes:existsSync(directory)?directoryBytes(directory):0,health:workerStatus(directory).storage?.health??"within_budget"})
+        return 0
+      }
       const installWorkerService = () => {
         assertWorkerRuntime()
         const registrationPath=join(directory,"service-runtime.json")
