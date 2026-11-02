@@ -209,7 +209,54 @@ environment files are excluded from the public tarball.
 
 MIT.
 
-## Continuous worker (development preview)
+## Automatic background-worker onboarding
+
+Every community member can use the same command on their own computer:
+
+```bash
+npx --yes indiecorns@latest worker setup --mode execute
+```
+
+Setup verifies the Indiecorns session and fresh community Slack feed, reuses an
+existing GitHub CLI login, verifies its actor through a read-only GitHub request,
+stores the validated credential privately for background startup, and registers
+the OS service with a permanent runtime when launched through npx. No member
+needs the Slack app token, workspace ID, channel ID or a hand-edited policy file.
+New execute policies enable only fresh verified Slack-member GitHub follows and
+stars, capped at **one external attempt per UTC day**. Omit `--mode execute` to
+collect observations and local briefs without external actions.
+
+If community login is missing, setup returns a device sign-in URL without opening
+a browser. Complete that authorization and rerun the returned resume command;
+pending handoffs are reused. If GitHub login is missing or under-scoped, the
+discovery service can still run and the JSON result includes the precise GitHub
+authorization command. Provider consent cannot be granted by another member.
+GitHub's scope headers are checked when available; providers enforce actual
+resource permissions when an action is attempted. Authentication is not proof of
+every permitted write.
+
+Setup is resumable and serialized. Repeating it preserves existing policy,
+queue, receipts, quotas and source selection, and does not reinstall a running
+service. A registered but unhealthy service is diagnosed for recovery rather
+than silently replaced. Existing execute policies bound to another account fail
+closed. Setup cannot remotely install software on other members' computers.
+
+```bash
+indiecorns worker setup --check
+indiecorns worker health --hours 24
+```
+
+`--check` performs read-only provider and OS checks and never stores credentials,
+creates policy, starts login, installs or restarts a service. Setup outputs JSON
+and exits nonzero when setup or authorization remains incomplete. `ready` means
+the configured worker and supported GitHub setup are ready; Product Hunt and other
+platforms are reported separately and are not implicitly enabled. Slack roster
+membership and mapped profiles are reported separately: missing identity links
+are never guessed from names or email addresses. Machines must remain awake,
+online and logged in. The initial sign-in and provider authorization still need
+the member's own session.
+
+## Continuous worker
 
 Background workers require Node.js 22.22 LTS or Node.js 24+ with built-in SQLite.
 Other CLI commands retain their existing Node.js support. Worker state must stay

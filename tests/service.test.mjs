@@ -25,6 +25,15 @@ test('service configuration rejects malformed paths and intervals', () => {
   assert.throws(() => serviceDefinition({ system: 'freebsd', cli: '/tmp/cli' }), /supports/)
 })
 
+test('custom community origin survives service startup on every OS',()=>{
+  for(const system of ['darwin','linux','win32']) {
+    const definition=serviceDefinition({system,cli:'/member/cli.mjs',appUrl:'https://community.example',userId:'S-1-5-21-1001'})
+    assert.match(definition.launcherContent??definition.content,/--app-url/)
+    assert.match(definition.launcherContent??definition.content,/https:\/\/community.example/)
+  }
+  assert.throws(()=>serviceDefinition({cli:'/member/cli',appUrl:'https://user:secret@community.example'}),/app URL/)
+})
+
 
 test('Windows worker runs hidden at login, without a runtime limit, with recurring recovery', () => {
   const definition = serviceDefinition({ system: 'win32', home: "C:\\Users\\O'Neil", node: 'C:\\Program Files\\nodejs\\node.exe', cli: "C:\\Users\\O'Neil\\community worker\\cli.mjs", userId: 'S-1-5-21-123-456-789-1001' })

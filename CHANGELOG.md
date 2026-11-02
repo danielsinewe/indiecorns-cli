@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.9 - 2026-11-02
+
+- Add resumable `worker setup --mode execute` for shared Slack-feed onboarding,
+  verified GitHub CLI credential reuse, private background credentials, a one-action
+  daily member policy and automatic supervised startup. Existing services, source
+  choices, policies, quotas and receipts remain unchanged on repeated setup.
+- Add read-only `worker setup --check` with actual process/heartbeat matching,
+  explicit account/permission failures and separate platform capability reporting.
+- Preserve custom community app URLs in generated background-service commands.
+
 ## 0.4.8 - 2026-11-01
 
 - Add opt-in Product Hunt profile follows through the documented API, using a

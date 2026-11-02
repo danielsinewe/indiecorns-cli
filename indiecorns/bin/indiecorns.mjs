@@ -27,6 +27,7 @@ import { syncCommunityFeed } from "../lib/community-feed.mjs"
 import { assertWorkerRuntime } from "../lib/worker-lock.mjs"
 import { readHealthReport } from "../lib/health.mjs"
 import { syncGithubMemberPosts } from "../lib/github-member-posts.mjs"
+import { setupWorker } from "../lib/onboarding.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -125,6 +126,8 @@ Commands:
   engage-members <action> [platform]
                                  Open member targets for like, reshare, upvote, rate, or comment
   worker run [--once]            Poll community targets durably in the background
+  worker setup [--mode execute]  Configure Slack priority, GitHub and background startup
+  worker setup --check           Read-only onboarding and service diagnosis
   worker status                  Inspect persisted worker queue and health
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
   worker policy                  Show action policy; configure exact GitHub targets
@@ -3037,6 +3040,7 @@ const runBrowserAuth = async (flags, mode = "login") => {
       code: cliSession.code,
       pollUrl: cliSession.poll_url,
       exchangeUrl: cliSession.exchange_url,
+      verificationUrl: authUrl.toString(),
       authMode: cliSession.authMode,
       createdAt: new Date().toISOString(),
     },
@@ -3050,6 +3054,7 @@ const runBrowserAuth = async (flags, mode = "login") => {
       code: cliSession.code ?? undefined,
       expiresAt: cliSession.expires_at ?? undefined,
       message: `Open the ${mode} URL to continue with Indiecorns.`,
+      ...(flags.resumeCommand?{resumeCommand:flags.resumeCommand}:{}),
     })
     return 0
   }
@@ -6688,6 +6693,53 @@ const main = async () => {
       })).digest("hex")
       const policyPath = join(directory, "policy.json")
       const readPolicy = () => existsSync(policyPath) ? validatePolicy(JSON.parse(readFileSync(policyPath, "utf8"))) : defaultPolicy
+      const installWorkerService = () => {
+        assertWorkerRuntime()
+        const registrationPath=join(directory,"service-runtime.json")
+        const previous=existsSync(registrationPath)?JSON.parse(readFileSync(registrationPath,"utf8")):null
+        const runtime=prepareServiceRuntime({cli:fileURLToPath(import.meta.url)})
+        const result=manageService("install",{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),interval:Number(flags["interval-seconds"]??300)})
+        mkdirSync(directory,{recursive:true,mode:0o700})
+        saveState(registrationPath,{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),managed:runtime.managed,runtimeDirectory:runtime.directory,registeredAt:Date.now()})
+        if(runtime.managed) {
+          try{pruneManagedRuntimes({active:runtime.directory,previous:previous?.runtimeDirectory})}
+          catch{result.runtimeCleanup="deferred"}
+        }
+        return result
+      }
+      if(args[0]==="setup") {
+        assertWorkerRuntime()
+        if(!["draft","collect","execute"].includes(flags.mode??"draft"))throw new Error("Setup mode must be collect, draft or execute")
+        const shellQuote=value=>`'${String(value).replace(/'/g,"'\\''")}'`
+        const resumeCommand=`indiecorns worker setup --mode ${flags.mode??"draft"}${getAppUrl(flags)!==DEFAULT_APP_URL?` --app-url ${shellQuote(getAppUrl(flags))}`:""}`
+        // Resume the existing device handoff without opening or selecting a browser.
+        if(!getCliAuthHeaders()&&!flags.check&&readConfig().pendingCliSession) {
+          const pending=readConfig().pendingCliSession
+          const session=await pollCliSession(pending)
+          if(session.status==="completed")saveCompletedSession({appUrl:pending.appUrl,session,id:pending.id,secret:pending.secret})
+          else if(!["expired","not_found"].includes(session.status)&&pending.verificationUrl) {
+            printJson({status:"browser_auth_required",url:pending.verificationUrl,resumeCommand})
+            return 1
+          }
+        }
+        if(!getCliAuthHeaders()&&!flags.check) {
+          await runBrowserAuth({...flags,json:true,"no-open":true,resumeCommand})
+          return 1
+        }
+        const output=await setupWorker({directory,appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),accountRevision:accountRevision(),
+          mode:flags.mode??"draft",check:Boolean(flags.check),install:installWorkerService,
+          persistAuth:()=>{
+            // launchd/systemd/Task Scheduler do not inherit this terminal's token.
+            // Bind the durable session to the same account revision as the env token.
+            if(process.env.INDIECORNS_TOKEN)writeConfig({...readConfig(),browserSession:{
+              appUrl:getAppUrl(flags),authMode:"device_code",accessToken:process.env.INDIECORNS_TOKEN,
+              userId:createHash("sha256").update(process.env.INDIECORNS_TOKEN).digest("hex"),authenticatedAt:new Date().toISOString(),
+            }})
+          },
+        })
+        printJson(output)
+        return output.state==="ready"?0:1
+      }
       if (args[0] === "credentials") {
         const provider = flags.provider
         if (flags.remove) printJson(storeCredential(directory, provider, null))
@@ -6729,23 +6781,14 @@ const main = async () => {
         return 0
       }
       if (["install", "uninstall", "service-status"].includes(args[0])) {
-        if (args[0] === "install") assertWorkerRuntime()
+        if(args[0]==="install") {printJson(installWorkerService());return 0}
         const registrationPath = join(directory, "service-runtime.json")
         const registration = existsSync(registrationPath) ? JSON.parse(readFileSync(registrationPath,"utf8")) : null
-        const runtime = args[0] === "install" ? prepareServiceRuntime({cli:fileURLToPath(import.meta.url)}) : {cli:registration?.cli ?? fileURLToPath(import.meta.url)}
         const result = manageService(args[0], {
-          cli: runtime.cli,
-          node: args[0] === "install" ? process.execPath : registration?.node ?? process.execPath,
+          cli: registration?.cli ?? fileURLToPath(import.meta.url),
+          node: registration?.node ?? process.execPath,
           interval: Number(flags["interval-seconds"] ?? 300),
         })
-        if (args[0] === "install") {
-          mkdirSync(directory,{recursive:true,mode:0o700})
-          saveState(registrationPath,{cli:runtime.cli,node:process.execPath,managed:runtime.managed,runtimeDirectory:runtime.directory,registeredAt:Date.now()})
-          if(runtime.managed) {
-            try { pruneManagedRuntimes({active:runtime.directory,previous:registration?.runtimeDirectory}) }
-            catch { result.runtimeCleanup = "deferred" }
-          }
-        }
         if (args[0] === "uninstall") rmSync(registrationPath,{force:true})
         printJson(result)
         return 0
