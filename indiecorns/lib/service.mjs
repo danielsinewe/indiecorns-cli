@@ -7,10 +7,14 @@ const psQuote = value => "'" + String(value).replace(/'/g, "''") + "'"
 const windowsQuote = value => '"' + String(value).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"'
 const xml = value => String(value).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]))
 const unitQuote = value => '"' + String(value).replace(/%/g, '%%').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, () => '$$') + '"'
-export function serviceDefinition({ system = platform(), home = homedir(), node = process.execPath, cli, interval = 300, appUrl, userId, windowsRoot = process.env.SystemRoot ?? 'C:\\Windows' }) {
+export function serviceDefinition({ system = platform(), home = homedir(), node = process.execPath, cli, interval = 300, appUrl, previousVersion, userId, windowsRoot = process.env.SystemRoot ?? 'C:\\Windows' }) {
   if (!cli || !Number.isInteger(interval) || interval < 1) throw new Error('Invalid service configuration')
   if ([home, node, cli].some(value => /[\n\r\0]/.test(value))) throw new Error('Invalid service path')
   const args = [node, cli, 'worker', 'run', '--interval-seconds', String(interval), '--no-telemetry']
+  if(previousVersion) {
+    if(typeof previousVersion!=='string'||previousVersion.length>64||!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(previousVersion))throw new Error('Invalid previous CLI version')
+    args.push('--previous-version',previousVersion)
+  }
   if(appUrl) {
     const url=new URL(appUrl)
     if(url.username||url.password||url.search||url.hash||!['https:','http:'].includes(url.protocol)||/[\r\n\0]/.test(appUrl))throw new Error('Invalid service app URL')

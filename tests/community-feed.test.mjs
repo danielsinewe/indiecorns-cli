@@ -2,12 +2,22 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {syncCommunityFeed} from '../indiecorns/lib/community-feed.mjs'
 import {prioritizeSlack} from '../indiecorns/lib/slack.mjs'
+import {createHash} from 'node:crypto'
 
 const snapshot={version:1,workspaceId:'TTEST',channelId:'CTEST',observedAt:1000,expiresAt:100000,
   memberIds:['UMEMBER'],identities:[{slackUserId:'UMEMBER',profileUrls:['https://peerlist.io/maker'],targets:[]}]}
 const target=path=>({platform:'peerlist',eventType:'inspect',profileUrl:`https://peerlist.io/${path}`,
   sharedBySlackUserId:'UMEMBER',slackChannelId:'CTEST'})
 const options={appUrl:'https://app.indiecorns.com',headers:{'x-indiecorns-cli-session':'member-session'}}
+
+test('version metadata changes preserve feed cursors and cooldowns, including migration from legacy header hashes',async()=>{
+  const oldHeaders={...options.headers,'x-indiecorns-cli-version':'0.4.10'}
+  const state={jobs:{},communityFeed:{binding:createHash('sha256').update(JSON.stringify(['https://app.indiecorns.com/api/community/worker-feed',oldHeaders])).digest('hex'),cursor:'saved',oldest:'1.000000',nextPollAt:100000,snapshot}}
+  await syncCommunityFeed({...options,state,headers:{...oldHeaders,'x-indiecorns-cli-version':'0.4.11'},headerAliases:[oldHeaders],now:()=>1000,request:()=>assert.fail('must honor cooldown')})
+  assert.equal(state.communityFeed.cursor,'saved');assert.equal(state.communityFeed.nextPollAt,100000)
+  await syncCommunityFeed({...options,state,headers:{...oldHeaders,'x-indiecorns-cli-version':'0.4.12'},now:()=>2000,request:()=>assert.fail('metadata must not reset auth')})
+  assert.equal(state.communityFeed.cursor,'saved')
+})
 
 test('members without Slack credentials checkpoint feed targets, membership and cursors across restart',async()=>{
   let clock=1000,calls=0

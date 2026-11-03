@@ -299,6 +299,9 @@ records whitelisted failure kind, stage, source key, network code or HTTP status
 It never stores exception messages, URLs, response bodies or tokens. Failed polls
 clear stale successful source rows; a healthy subsequent poll clears the active
 error while retaining diagnostic history. SIGINT and SIGTERM release
+the process guard. CLI version metadata does not change credential identity;
+upgrades preserve matching discovery/feed cursors and provider cooldowns. The
+worker handles SIGINT and SIGTERM by releasing
 ownership cleanly. A dedicated SQLite exclusive transaction provides process
 ownership; the OS releases it after a forced crash. The PID file is diagnostic,
 so losing it or reusing a dead worker's PID cannot admit a second worker or block

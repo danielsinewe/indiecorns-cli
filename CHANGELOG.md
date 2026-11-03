@@ -7,6 +7,8 @@
   provider cooldowns, queued progress, receipts and health history.
 - Recover a transient GET failure with one bounded retry and report the retry;
   do not immediately retry rate limits or certificate failures.
+- Keep credential identity stable across version metadata changes and migrate
+  matching legacy bindings without clearing cursors or provider cooldowns.
 - Add `worker setup --wait --ndjson` to continue automatically after device
   authorization and preserve requested setup mode across resumptions.
 - Reuse an already-refreshed GitHub CLI token only for the same proven actor;

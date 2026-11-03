@@ -61,7 +61,7 @@ export function enqueue(state, targets, now) {
   }
 }
 export async function runWorker({ directory, discover, once = false, intervalMs = 300000,
-  signal, now = Date.now, onCycle = () => {}, authRevision, discoveryRevision, observe, deriveTargets, derivationRevision = 1, act, prioritize, observationLimit = 5 }) {
+  signal, now = Date.now, onCycle = () => {}, authRevision, authRevisionAliases=[], discoveryRevision, observe, deriveTargets, derivationRevision = 1, act, prioritize, observationLimit = 5 }) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw new Error('Interval must be at least 1000ms')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const releaseGuard=await acquireWorkerGuard(directory)
@@ -87,6 +87,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
     if (state.version !== 1 || !state.jobs) throw new Error('Unsupported worker state')
     attachBacklog(state,directory,saveState)
     health=startHealthMonitor({directory,session:owner,state,now,onStatus:status=>{state.healthHistoryStatus=status}})
+    if(authRevision&&authRevisionAliases.includes(state.authRevision))state.authRevision=authRevision
     if (authRevision && state.authRevision !== authRevision) {
       state.nextPollAt = 0
       state.discovery = {}

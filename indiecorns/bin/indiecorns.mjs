@@ -29,6 +29,7 @@ import { readHealthReport } from "../lib/health.mjs"
 import { syncGithubMemberPosts } from "../lib/github-member-posts.mjs"
 import { setupWorker } from "../lib/onboarding.mjs"
 import {storageSettings,directoryBytes} from "../lib/storage.mjs"
+import {credentialRevision} from "../lib/auth-context.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -6610,6 +6611,9 @@ const main = async () => {
   switch (command) {
     case "worker": {
       const directory = join(configDir, "worker")
+      const registrationFile=join(directory,"service-runtime.json")
+      const previousVersion=flags["previous-version"]??(existsSync(registrationFile)?JSON.parse(readFileSync(registrationFile,"utf8")).previousVersion:null)
+      const workerHeaderAliases=()=>previousVersion&&getCliAuthHeaders()?[{...getCliAuthHeaders(),"x-indiecorns-cli-version":previousVersion}]:[]
       const slackPath = join(directory, "slack-evidence.json")
       const slackSettingsPath = join(directory, "slack-settings.json")
       let memberSnapshot = null
@@ -6629,7 +6633,7 @@ const main = async () => {
         const token = useCommunity ? null : localToken
         if (useCommunity) {
           snapshot = await syncCommunityFeed({state,signal,checkpoint,appUrl:getAppUrl(flags),
-            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:getCliAuthHeaders()})
+            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:getCliAuthHeaders(),headerAliases:workerHeaderAliases()})
           state.slackSource = "community_feed"
         } else state.slackSource = "local_slack"
         if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
@@ -6721,10 +6725,14 @@ const main = async () => {
         assertWorkerRuntime()
         const registrationPath=join(directory,"service-runtime.json")
         const previous=existsSync(registrationPath)?JSON.parse(readFileSync(registrationPath,"utf8")):null
+        let previousVersion
+        if(previous?.cli) {
+          try{previousVersion=JSON.parse(readFileSync(resolve(dirname(previous.cli),"../../package.json"),"utf8")).version}catch{}
+        }
         const runtime=prepareServiceRuntime({cli:fileURLToPath(import.meta.url)})
-        const result=manageService("install",{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),interval:Number(flags["interval-seconds"]??300)})
+        const result=manageService("install",{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),previousVersion,interval:Number(flags["interval-seconds"]??300)})
         mkdirSync(directory,{recursive:true,mode:0o700})
-        saveState(registrationPath,{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),managed:runtime.managed,runtimeDirectory:runtime.directory,registeredAt:Date.now()})
+        saveState(registrationPath,{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),managed:runtime.managed,runtimeDirectory:runtime.directory,registeredAt:Date.now(),...(previousVersion?{previousVersion}:{})})
         if(runtime.managed) {
           try{pruneManagedRuntimes({active:runtime.directory,previous:previous?.runtimeDirectory})}
           catch{result.runtimeCleanup="deferred"}
@@ -6851,7 +6859,8 @@ const main = async () => {
       try {
         const state = await runWorker({
           directory,
-          authRevision: createHash("sha256").update(JSON.stringify(getCliAuthHeaders())).digest("hex"),
+          authRevision: credentialRevision(getCliAuthHeaders()),
+          authRevisionAliases: [getCliAuthHeaders(),...workerHeaderAliases()].map(headers=>createHash("sha256").update(JSON.stringify(headers)).digest("hex")),
           discoveryRevision: "community-13-pages-v2",
           once: Boolean(flags.once),
           intervalMs: Number(flags["interval-seconds"] ?? 300) * 1000,
