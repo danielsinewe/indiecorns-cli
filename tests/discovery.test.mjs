@@ -148,3 +148,13 @@ test('certificate failures are classified without an immediate retry',async()=>{
     assert.equal(calls,1)
   }
 })
+
+test('auth denial retains safe exact status and source while cancelling response',async()=>{
+ let cancelled=false
+ await assert.rejects(discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/api/community/action-targets',headers:{Authorization:'Bearer private'},
+  request:async()=>new Response(new ReadableStream({cancel(){cancelled=true}}),{status:403})}),error=>{
+   assert.deepEqual(safeDiscoveryError(error),{kind:'authentication',stage:'request',source:'peerlist/follow/profiles',httpStatus:403})
+   return true
+  })
+ assert.equal(cancelled,true)
+})

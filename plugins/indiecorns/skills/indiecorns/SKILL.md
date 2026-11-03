@@ -23,7 +23,9 @@ arguments. This path needs no browser extension or local Slack app credential.
 Setup streams a device authorization URL and continues in the same process after
 the member authorizes their own account. Follow the host's permitted-browser
 rules and keep the CLI process running while completing that handoff. A member's
-provider authorization cannot be granted by another member. Missing GitHub login
+provider authorization cannot be granted by another member. Waiting setup also
+recovers from temporary community-service failures within its timeout, honoring
+provider cooldowns. A service_unavailable result is not a request to sign in again. Missing GitHub login
 or scopes remain explicit requirements; do not invent credentials or memberships.
 Reused refreshed GitHub credentials must match the previously proven actor.
 

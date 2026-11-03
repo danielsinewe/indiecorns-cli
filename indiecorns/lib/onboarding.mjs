@@ -65,7 +65,8 @@ export async function setupWorker(options) {
 
 async function setup({directory,appUrl,headers,accountRevision,mode='draft',check=false,
   request=fetch,environment=process.env,run=command,inspect=()=>inspectWorkerProcess(directory),
-  install,persistAuth=()=>{},runtimeVersion=process.versions.node,wait=sleep}) {
+  install,persistAuth=()=>{},runtimeVersion=process.versions.node,wait=sleep,
+  retryForMs=0,onProgress=()=>{},now=Date.now}) {
   assertWorkerRuntime(runtimeVersion)
   if(!['draft','collect','execute'].includes(mode))throw new Error('Setup mode must be collect, draft or execute')
   const result={version:1,command:'worker setup',check,state:'action_required',steps:[],limitations:['computer_must_be_awake_online_and_logged_in']}
@@ -73,10 +74,25 @@ async function setup({directory,appUrl,headers,accountRevision,mode='draft',chec
   if(!headers) {step('community_auth','required',{nextCommand:'indiecorns login --json --no-open'});return result}
   // Preflight in memory: never modify a running worker's queue or feed cursor.
   const probe={jobs:{}}
-  const snapshot=await syncCommunityFeed({state:probe,appUrl,headers,request,
-    endpoint:headers.Authorization?'/api/public/cli/worker-feed':'/api/community/worker-feed'})
+  if(!Number.isFinite(retryForMs)||retryForMs<0||retryForMs>900000)throw new Error('Invalid setup recovery timeout')
+  const retryUntil=now()+(check?0:retryForMs)
+  let snapshot
+  for(let attempt=0;attempt<32;attempt++) {
+    snapshot=await syncCommunityFeed({state:probe,appUrl,headers,request,now,
+      endpoint:headers.Authorization?'/api/public/cli/worker-feed':'/api/community/worker-feed'})
+    if(probe.communityFeed?.health==='ok'||probe.communityFeed?.health==='auth_required')break
+    const delay=Math.max(1000,(probe.communityFeed?.nextPollAt??now()+60000)-now())
+    if(now()+delay>retryUntil)break
+    onProgress({type:'worker.setup.retrying',step:'community_service',retryAfterMs:delay,
+      ...(probe.communityFeed?.httpStatus?{httpStatus:probe.communityFeed.httpStatus}:{})})
+    await wait(delay)
+  }
   if(probe.communityFeed?.health!=='ok'||!snapshot) {
-    step('community_auth',probe.communityFeed?.health??'unavailable',{nextCommand:'indiecorns login --json --no-open'});return result
+    const denied=probe.communityFeed?.health==='auth_required'
+    if(!denied)result.state='service_unavailable'
+    step(denied?'community_auth':'community_service',probe.communityFeed?.health??'unavailable',{
+      ...(denied?{nextCommand:'indiecorns login --json --no-open'}:{retryAfterMs:Math.max(0,(probe.communityFeed?.nextPollAt??now())-now())}),
+      ...(probe.communityFeed?.httpStatus?{httpStatus:probe.communityFeed.httpStatus}:{})});return result
   }
   step('community_auth','verified')
   step('slack_feed','verified',{members:snapshot.memberIds.length,mappedMembers:new Set(snapshot.identities.map(i=>i.slackUserId)).size,requiresLocalSlackCredential:false})

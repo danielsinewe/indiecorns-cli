@@ -217,3 +217,33 @@ test('waiting CLI setup completes device handoff and automatically proceeds to s
     assert.equal(config.browserSession.userId,'11111111-1111-4111-8111-111111111111');assert.equal(config.pendingCliSession,undefined)
   }finally{server.close();f.close()}
 })
+
+test('waiting setup recovers from auth-service outage without requesting login or touching live state',async()=>{
+ const f=fixture();let clock=Date.now(),calls=0;const events=[];const original=f.options.request
+ try {
+  saveState(join(f.directory,'state.json'),{jobs:{},actions:{receipt:{status:'completed'}},actionBudget:{day:'2026-11-03',attempts:1}})
+  const before=readFileSync(join(f.directory,'state.json'),'utf8')
+  const result=await setupWorker({...f.options,now:()=>clock,retryForMs:180000,onProgress:e=>events.push(e),wait:async ms=>{assert.ok(ms>=60000);clock+=ms},
+   request:async(url,options)=>!String(url).includes('api.github.com')&&calls++===0?new Response('',{status:503,headers:{'retry-after':'30'}}):original(url,options)})
+  assert.equal(result.state,'ready');assert.equal(events.length,1);assert.equal(events[0].httpStatus,503)
+  assert.equal(readFileSync(join(f.directory,'state.json'),'utf8'),before)
+  assert.doesNotMatch(JSON.stringify(events),/secret|Bearer/)
+ }finally{f.close()}
+})
+test('setup preserves provider cooldown beyond wait budget and never asks for login on an outage',async()=>{
+ const f=fixture();let calls=0
+ try {
+  const result=await setupWorker({...f.options,retryForMs:180000,request:async()=>{calls++;return new Response('',{status:503,headers:{'retry-after':'600'}})},wait:async()=>assert.fail('must not wait past timeout')})
+  assert.equal(result.state,'service_unavailable');assert.equal(calls,1)
+  assert.equal(result.steps[0].id,'community_service');assert.ok(result.steps[0].retryAfterMs>500000)
+  assert.doesNotMatch(JSON.stringify(result),/indiecorns login/);assert.equal(f.counts().installed,0)
+ }finally{f.close()}
+})
+test('genuine denied credentials stop waiting without retry or granting access',async()=>{
+ const f=fixture();let calls=0
+ try {
+  const result=await setupWorker({...f.options,retryForMs:180000,request:async()=>{calls++;return new Response('',{status:401})},wait:async()=>assert.fail('do not retry invalid auth')})
+  assert.equal(result.state,'action_required');assert.equal(calls,1);assert.equal(result.steps[0].httpStatus,401)
+  assert.equal(result.steps[0].id,'community_auth');assert.equal(f.counts().installed,0)
+ }finally{f.close()}
+})

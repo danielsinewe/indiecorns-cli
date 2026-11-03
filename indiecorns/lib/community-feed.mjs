@@ -3,6 +3,7 @@ import {boundedText,retryDelay} from './discovery.mjs'
 import {validateSlackEvidence} from './slack.mjs'
 import {enqueue} from './worker.mjs'
 import {credentialContext} from './auth-context.mjs'
+import {safeDiscoveryError} from './discovery-errors.mjs'
 
 // Community authentication authorizes this feed. Provider credentials remain on
 // the community server; clients retain only membership proof and link jobs.
@@ -22,9 +23,11 @@ export async function syncCommunityFeed({state,appUrl,endpoint='/api/community/w
   url.searchParams.set('oldest',feed.oldest)
   if(feed.cursor)url.searchParams.set('cursor',feed.cursor)
   try {
+    delete feed.httpStatus
     const response=await request(url,{headers,redirect:'error',
       signal:AbortSignal.any([signal??new AbortController().signal,AbortSignal.timeout(30000)])})
     if(!response.ok){
+      feed.httpStatus=response.status
       if(response.status===401)state.lastError='auth_required'
       if(response.status===409 && feed.cursor){
         await response.body?.cancel()
@@ -54,9 +57,12 @@ export async function syncCommunityFeed({state,appUrl,endpoint='/api/community/w
     if(!feed.cursor)feed.oldest=latest
     feed.nextPollAt=now()+(feed.cursor?60000:300000)
     feed.health='ok'
+    delete feed.httpStatus
+    delete feed.error
     checkpoint()
   } catch(error) {
     feed.health=['auth_required','rate_limited','feed_unavailable','invalid_feed','cursor_reset'].includes(error.code)?error.code:'feed_unavailable'
+    feed.error={...safeDiscoveryError(error),...(feed.httpStatus?{httpStatus:feed.httpStatus}:{}),at:now()}
     feed.nextPollAt=now()+Math.max(60000,error.retryAfterMs??300000)
     checkpoint()
   }
