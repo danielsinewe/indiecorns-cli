@@ -129,6 +129,7 @@ Commands:
   worker run [--once]            Poll community targets durably in the background
   worker setup [--mode execute]  Configure Slack priority, GitHub and background startup
   worker setup --check           Read-only onboarding and service diagnosis
+  worker setup --wait --ndjson   Continue through device sign-in without rerunning setup
   worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
@@ -3049,7 +3050,7 @@ const runBrowserAuth = async (flags, mode = "login") => {
   })
 
   if (flags.json) {
-    printJson({
+    const result={
       status: "browser_auth_required",
       mode,
       url: authUrl.toString(),
@@ -3057,7 +3058,9 @@ const runBrowserAuth = async (flags, mode = "login") => {
       expiresAt: cliSession.expires_at ?? undefined,
       message: `Open the ${mode} URL to continue with Indiecorns.`,
       ...(flags.resumeCommand?{resumeCommand:flags.resumeCommand}:{}),
-    })
+    }
+    if(flags.returnAuthResult)return result
+    printJson(result)
     return 0
   }
 
@@ -6721,25 +6724,42 @@ const main = async () => {
       }
       if(args[0]==="setup") {
         assertWorkerRuntime()
-        if(!["draft","collect","execute"].includes(flags.mode??"draft"))throw new Error("Setup mode must be collect, draft or execute")
+        const setupMode=flags.mode??(!getCliAuthHeaders()?readConfig().pendingCliSession?.workerSetupMode:undefined)??"draft"
+        if(!["draft","collect","execute"].includes(setupMode))throw new Error("Setup mode must be collect, draft or execute")
+        if(flags.wait&&!flags.ndjson)throw new Error("Use --wait --ndjson to stream the authorization URL and continue setup automatically")
+        const timeoutSeconds=Number(flags.timeout??180)
+        if(flags.wait&&(!Number.isInteger(timeoutSeconds)||timeoutSeconds<1||timeoutSeconds>900))throw new Error("Setup wait timeout must be between 1 and 900 seconds")
         const shellQuote=value=>`'${String(value).replace(/'/g,"'\\''")}'`
-        const resumeCommand=`indiecorns worker setup --mode ${flags.mode??"draft"}${getAppUrl(flags)!==DEFAULT_APP_URL?` --app-url ${shellQuote(getAppUrl(flags))}`:""}`
+        const resumeCommand=`indiecorns worker setup --mode ${setupMode}${getAppUrl(flags)!==DEFAULT_APP_URL?` --app-url ${shellQuote(getAppUrl(flags))}`:""}`
+        let authorization
         // Resume the existing device handoff without opening or selecting a browser.
         if(!getCliAuthHeaders()&&!flags.check&&readConfig().pendingCliSession) {
           const pending=readConfig().pendingCliSession
           const session=await pollCliSession(pending)
           if(session.status==="completed")saveCompletedSession({appUrl:pending.appUrl,session,id:pending.id,secret:pending.secret})
           else if(!["expired","not_found"].includes(session.status)&&pending.verificationUrl) {
-            printJson({status:"browser_auth_required",url:pending.verificationUrl,resumeCommand})
-            return 1
+            authorization={status:"browser_auth_required",url:pending.verificationUrl,resumeCommand}
           }
         }
         if(!getCliAuthHeaders()&&!flags.check) {
-          await runBrowserAuth({...flags,json:true,"no-open":true,resumeCommand})
-          return 1
+          authorization??=await runBrowserAuth({...flags,json:true,"no-open":true,resumeCommand,returnAuthResult:true})
+          writeConfig({...readConfig(),pendingCliSession:{...readConfig().pendingCliSession,workerSetupMode:setupMode}})
+          if(!flags.wait) {
+            if(flags.ndjson)printNdjson({type:"worker.setup.authorization_required",...authorization})
+            else printJson(authorization)
+            return 1
+          }
+          printNdjson({type:"worker.setup.authorization_required",...authorization})
+          const pending=readConfig().pendingCliSession
+          const completed=await waitForAppCliSession({appUrl:pending.appUrl,id:pending.id,secret:pending.secret,session:pending,timeoutSeconds})
+          if(completed.status!=="completed") {
+            printNdjson({type:"worker.setup.action_required",status:completed.status,resumeCommand})
+            return 1
+          }
+          printNdjson({type:"worker.setup.authenticated"})
         }
         const output=await setupWorker({directory,appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),accountRevision:accountRevision(),
-          mode:flags.mode??"draft",check:Boolean(flags.check),install:installWorkerService,
+          mode:setupMode,check:Boolean(flags.check),install:installWorkerService,
           persistAuth:()=>{
             // launchd/systemd/Task Scheduler do not inherit this terminal's token.
             // Bind the durable session to the same account revision as the env token.
@@ -6749,7 +6769,8 @@ const main = async () => {
             }})
           },
         })
-        printJson(output)
+        if(flags.ndjson)printNdjson({type:"worker.setup.completed",...output})
+        else printJson(output)
         return output.state==="ready"?0:1
       }
       if (args[0] === "credentials") {

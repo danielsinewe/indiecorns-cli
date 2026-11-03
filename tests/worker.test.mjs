@@ -4,8 +4,40 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runWorker, workerStatus, targetKey } from '../indiecorns/lib/worker.mjs'
+import {discoverCommunity} from '../indiecorns/lib/discovery.mjs'
 const target = (path, slackMember = false) => ({ platform: 'x', eventType: 'like', profileUrl: `https://x.com/${path}`, slackMember })
 const fixture = () => mkdtempSync(join(tmpdir(), 'indiecorns-worker-'))
+
+test('persistent transport failures retry within five minutes, survive restart and recover without resetting receipts',async()=>{
+  const directory=fixture();let clock=1000,calls=0,offline=true
+  const options={directory,once:true,intervalMs:300000,now:()=>clock,discover:()=>discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async()=>{},
+    request:async()=>{calls++;if(offline)throw Object.assign(new TypeError('secret-token'),{cause:{code:'ECONNRESET'}});return Response.json({targets:[]})}})}
+  try {
+    for(let n=0;n<30;n++){
+      const failed=await runWorker(options)
+      assert.equal(failed.nextPollAt-clock,300000)
+      assert.equal(failed.discoveryError.kind,'transport');assert.equal(failed.discoveryError.code,'ECONNRESET');assert.deepEqual(failed.sources,[])
+      const count=calls;await runWorker(options);assert.equal(calls,count)
+      clock=failed.nextPollAt
+    }
+    const persisted=workerStatus(directory).state
+    persisted.actions={original:{kind:'github_star',status:'completed',completedAt:1}};persisted.actionBudget={day:'2026-11-03',attempts:1}
+    writeFileSync(join(directory,'state.json'),JSON.stringify(persisted))
+    offline=false;const recovered=await runWorker(options)
+    assert.equal(recovered.lastError,null);assert.equal(recovered.discoveryError,null);assert.equal(recovered.actions.original.completedAt,1);assert.equal(recovered.actionBudget.attempts,1)
+    assert.equal(recovered.discoveryFailures.length,24);assert.doesNotMatch(JSON.stringify(recovered),/secret-token/)
+  }finally{rmSync(directory,{recursive:true})}
+})
+
+test('server failures have bounded recovery while explicit provider retry-after remains honored',async()=>{
+  const directory=fixture();let clock=1000
+  try {
+    const options={directory,once:true,intervalMs:300000,now:()=>clock,discover:async()=>({targets:[],partial:true,sources:[{status:'failed',httpStatus:502}]})}
+    for(let n=0;n<10;n++){const s=await runWorker(options);assert.equal(s.nextPollAt-clock,300000);clock=s.nextPollAt}
+    const limited=await runWorker({...options,discover:async()=>({targets:[],partial:true,sources:[{status:'rate_limited'}],retryAfterMs:7200000})})
+    assert.equal(limited.nextPollAt-clock,7200000)
+  }finally{rmSync(directory,{recursive:true})}
+})
 
 test('queue persists across restart, deduplicates, and prioritizes explicit Slack membership', async () => {
   const directory = fixture()

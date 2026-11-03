@@ -4,6 +4,7 @@ import {mkdtempSync,rmSync,readFileSync,existsSync,writeFileSync,statSync} from 
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {setupWorker,inspectWorkerProcess} from '../indiecorns/lib/onboarding.mjs'
+import {storeCredential} from '../indiecorns/lib/credentials.mjs'
 import {saveState} from '../indiecorns/lib/worker.mjs'
 import {spawn} from 'node:child_process'
 import {createServer} from 'node:http'
@@ -140,18 +141,79 @@ test('actual setup reuses its pending device authorization and returns the origi
     else {res.statusCode=500;res.end('{}')}
   })
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`
-  const run=()=>new Promise((resolve,reject)=>{
-    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup','--mode','execute','--app-url',origin,'--no-open','--no-telemetry'],{
+  const run=(includeMode=true)=>new Promise((resolve,reject)=>{
+    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup',...(includeMode?['--mode','execute']:[]),'--app-url',origin,'--no-open','--no-telemetry'],{
       env:{...process.env,HOME:f.directory,USERPROFILE:f.directory,INDIECORNS_TOKEN:'',INDIECORNS_GITHUB_TOKEN:''},stdio:['ignore','pipe','pipe']})
     let stdout='',stderr='';child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);child.on('error',reject)
     child.on('close',code=>resolve({code,stdout,stderr}))
   })
   try {
-    const first=await run(),second=await run()
+    const first=await run(),second=await run(false)
     assert.equal(first.code,1,first.stderr);assert.equal(second.code,1,second.stderr)
     const a=JSON.parse(first.stdout),b=JSON.parse(second.stdout)
     assert.equal(a.status,'browser_auth_required');assert.equal(b.url,a.url);assert.equal(a.resumeCommand,b.resumeCommand)
     assert.match(a.resumeCommand,/worker setup --mode execute --app-url/);assert.equal(sessions,1)
     assert.equal(existsSync(join(f.directory,'.indiecorns','worker','service-runtime.json')),false)
+  }finally{server.close();f.close()}
+})
+
+test('setup reuses a refreshed gh credential only for the same proven actor, without restarting or changing policy',async()=>{
+  const f=fixture()
+  try {
+    await setupWorker(f.options)
+    const policy=readFileSync(join(f.directory,'policy.json'),'utf8')
+    storeCredential(f.directory,'github','expired-secret')
+    const request=async(url,settings)=>String(url).includes('api.github.com')&&settings.headers.Authorization==='Bearer expired-secret'?
+      new Response('',{status:401}):f.options.request(url,settings)
+    const check=await setupWorker({...f.options,request,check:true})
+    assert.equal(check.state,'setup_required');assert.equal(JSON.parse(readFileSync(join(f.directory,'credentials.json'))).github,'expired-secret')
+    const renewed=await setupWorker({...f.options,request})
+    assert.equal(renewed.state,'ready');assert.equal(renewed.steps.find(s=>s.id==='github').source,'github_cli_refreshed')
+    assert.equal(JSON.parse(readFileSync(join(f.directory,'credentials.json'))).github,'github-secret')
+    assert.equal(f.counts().installed,1);assert.equal(readFileSync(join(f.directory,'policy.json'),'utf8'),policy)
+    storeCredential(f.directory,'github','expired-secret')
+    const otherRequest=async(url,settings)=>String(url).includes('api.github.com')&&settings.headers.Authorization==='Bearer github-secret'?
+      Response.json({id:456,login:'other'},{headers:{'x-oauth-scopes':'public_repo,user:follow'}}):request(url,settings)
+    const mismatch=await setupWorker({...f.options,request:otherRequest})
+    assert.equal(mismatch.state,'running_with_action_requirements');assert.equal(JSON.parse(readFileSync(join(f.directory,'credentials.json'))).github,'expired-secret')
+  }finally{f.close()}
+})
+
+test('setup does not try other credentials to bypass provider throttling, or call unhealthy sources ready',async()=>{
+  const f=fixture()
+  try {
+    await setupWorker(f.options)
+    const result=await setupWorker({...f.options,run:()=>assert.fail('must honor rate limit'),request:async(url,settings)=>String(url).includes('api.github.com')?
+      new Response('',{status:429,headers:{'retry-after':'600'}}):f.options.request(url,settings)})
+    assert.equal(result.state,'running_with_action_requirements')
+    const unhealthy=await setupWorker({...f.options,inspect:()=>({registered:true,running:true,pid:123,appUrl:f.options.appUrl,sourcesHealthy:false})})
+    assert.equal(unhealthy.state,'running_with_source_requirements');assert.equal(f.counts().installed,1)
+  }finally{f.close()}
+})
+
+test('waiting CLI setup completes device handoff and automatically proceeds to setup in the same process',async()=>{
+  const f=fixture();let origin,polls=0,feedCalls=0
+  const server=createServer((req,res)=>{
+    res.setHeader('content-type','application/json')
+    if(req.method==='POST'&&req.url==='/api/public/cli/session')res.end(JSON.stringify({code:'WAIT123',verification_url:`${origin}/collective?cli=WAIT123`,expires_at:'2099-01-01T00:00:00Z',poll_url:`${origin}/api/public/cli/session/WAIT123`,exchange_url:`${origin}/api/public/cli/session/WAIT123/exchange`}))
+    else if(req.url==='/api/public/cli/session/WAIT123') {polls++;res.end(JSON.stringify({code:'WAIT123',status:'completed',completed_at:'2026-11-03T06:00:00Z'}))}
+    else if(req.url==='/api/public/cli/session/WAIT123/exchange')res.end(JSON.stringify({token:'wait-token',user_id:'11111111-1111-4111-8111-111111111111',token_expires_at:'2099-01-01T00:00:00Z'}))
+    else if(req.url.startsWith('/api/public/cli/worker-feed')){feedCalls++;assert.equal(req.headers.authorization,'Bearer wait-token');res.statusCode=401;res.end('{}')}
+    else {res.statusCode=404;res.end('{}')}
+  })
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`
+  try {
+    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup','--mode','execute','--wait','--ndjson','--timeout','10','--app-url',origin,'--no-telemetry'],{
+      env:{...process.env,HOME:f.directory,USERPROFILE:f.directory,INDIECORNS_TOKEN:'',INDIECORNS_GITHUB_TOKEN:''},stdio:['ignore','pipe','pipe']})
+    let stdout='',stderr='';child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b)
+    const code=await new Promise(resolve=>child.on('close',resolve))
+    // Stop before native OS registration: this test proves the real auth-to-setup
+    // transition; the feed intentionally refuses access after token exchange.
+    assert.equal(code,1,stderr);const events=stdout.trim().split('\n').map(line=>JSON.parse(line))
+    assert.deepEqual(events.map(e=>e.type),['worker.setup.authorization_required','worker.setup.authenticated','worker.setup.completed'])
+    assert.equal(events.at(-1).steps[0].status,'auth_required');assert.equal(feedCalls,1);assert.ok(polls>=1)
+    assert.doesNotMatch(stdout,/wait-token/)
+    const config=JSON.parse(readFileSync(join(f.directory,'.indiecorns','config.json')))
+    assert.equal(config.browserSession.userId,'11111111-1111-4111-8111-111111111111');assert.equal(config.pendingCliSession,undefined)
   }finally{server.close();f.close()}
 })

@@ -5,6 +5,7 @@ import {runWorker,workerStatus} from '../indiecorns/lib/worker.mjs'
 import {mkdtempSync,rmSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import {safeDiscoveryError} from '../indiecorns/lib/discovery-errors.mjs'
 
 test('discovery explicitly queries profiles, projects, posts and all four platforms', async () => {
   const queries = []
@@ -116,4 +117,25 @@ test('repeated cursors and invalid page metadata cannot masquerade as completed 
     assert.equal(result.continuation,false)
     assert.ok(result.sources.every(source=>['repeated_cursor','invalid_pagination'].includes(source.status)))
   }
+})
+
+test('transport, DNS, timeout and malformed-body diagnostics retain no messages, URLs or secrets',async()=>{
+  for(const [request,expected]of [
+    [async()=>{throw Object.assign(new TypeError('Bearer secret-token https://private.example'),{cause:{code:'ENOTFOUND'}})}, {kind:'transport',stage:'request',code:'ENOTFOUND'}],
+    [async()=>{throw Object.assign(new TypeError('secret-token'),{cause:{errors:[{code:'ENETUNREACH'}]}})}, {kind:'transport',stage:'request',code:'ENETUNREACH'}],
+    [async()=>{throw new DOMException('secret-token','TimeoutError')}, {kind:'timeout',stage:'request'}],
+    [async()=>new Response('<html>secret-token</html>'), {kind:'invalid_response',stage:'body'}],
+  ]) {
+    try{await discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},request,pause:async()=>{}});assert.fail('must fail')}
+    catch(error){assert.deepEqual(safeDiscoveryError(error),{...expected,source:'peerlist/follow/profiles'});assert.doesNotMatch(JSON.stringify(safeDiscoveryError(error)),/secret-token|private.example/)}
+  }
+  assert.deepEqual(safeDiscoveryError({discoveryError:{kind:'bad',stage:'secret',token:'secret-token'}}),{kind:'unknown',stage:'request'})
+})
+
+test('a single bounded GET retry recovers a transient connection failure and reports the retry',async()=>{
+  let calls=0;const pauses=[]
+  const result=await discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async ms=>pauses.push(ms),
+    request:async()=>{calls++;if(calls===1)throw Object.assign(new TypeError('private-message'),{cause:{code:'ECONNRESET'}});return Response.json({targets:[]})}})
+  assert.equal(calls,14);assert.equal(result.partial,false);assert.equal(result.sources[0].transportRetries,1);assert.equal(pauses[0],1000)
+  assert.doesNotMatch(JSON.stringify(result),/private-message/)
 })

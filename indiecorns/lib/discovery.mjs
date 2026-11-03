@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises'
+import {discoveryError} from './discovery-errors.mjs'
 
 export const discoverySources = [
   ...['peerlist', 'x', 'linkedin', 'producthunt'].map(platform => ({ platform, eventType: 'follow', targetSource: 'profiles' })),
@@ -36,9 +37,10 @@ export async function discoverCommunity({ appUrl, endpoint, headers, signal, req
   if (!headers) throw Object.assign(new Error('Authentication required'), { code: 'AUTH_REQUIRED' })
   if (!Number.isInteger(maxPagesPerSource) || maxPagesPerSource<1 || maxPagesPerSource>5) throw new Error('Invalid discovery page budget')
   const targets = [],sources = []
+  const transportRetries=new Map()
   let currentProgress=progress,requests=0
   const continuing=discoverySources.some(source=>progress[discoverySourceKey(source)]?.cursor!=null)
-  const result=extra=>({targets,sources,progress:currentProgress,
+  const result=extra=>({targets,sources:sources.map(source=>({...source,...(transportRetries.has(discoverySourceKey(source))?{transportRetries:transportRetries.get(discoverySourceKey(source))}:{})})),progress:currentProgress,
     partial:sources.some(source=>source.status!=='ok'),
     continuation:sources.some(source=>source.status==='paging') && sources.every(source=>['ok','paging'].includes(source.status)),...extra})
   for (const source of discoverySources) {
@@ -57,8 +59,20 @@ export async function discoverCommunity({ appUrl, endpoint, headers, signal, req
       if (url.origin !== new URL(appUrl).origin) throw new Error('Invalid API origin')
       for (const [name,value] of Object.entries({...source,limit:'200'})) url.searchParams.set(name,value)
       if(cursor!==null) url.searchParams.set('cursor',cursor)
-      const response = await request(url, { headers, redirect: 'error',
-        signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(30000)]) })
+      let response
+      for(let attempt=0;attempt<2;attempt++) {
+        try {response = await request(url, { headers, redirect: 'error',
+          signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(30000)]) });break}
+        catch(error){
+          const failure=discoveryError(error,'request',key)
+          if(attempt===0&&!signal?.aborted&&['transport','timeout'].includes(failure.kind)&&!['CERT_HAS_EXPIRED','UNABLE_TO_VERIFY_LEAF_SIGNATURE'].includes(failure.code)) {
+            transportRetries.set(key,(transportRetries.get(key)??0)+1)
+            await pause(1000,signal)
+            continue
+          }
+          throw Object.assign(error,{discoveryError:failure})
+        }
+      }
       if ([401,403].includes(response.status)) throw Object.assign(new Error('Authentication required'),{code:'AUTH_REQUIRED'})
       if ([429,503].includes(response.status)) {
         const retryAfterMs=retryDelay(response.headers.get('retry-after'))
@@ -68,10 +82,16 @@ export async function discoverCommunity({ appUrl, endpoint, headers, signal, req
       }
       if(!response.ok) {
         await response.body?.cancel()
-        sources.push({...source,status:'failed',count});break
+        sources.push({...source,status:'failed',httpStatus:response.status,count});break
       }
-      const body=JSON.parse(await boundedText(response))
-      if(!Array.isArray(body.targets) || body.targets.length>200) throw new Error('Invalid discovery response')
+      let body
+      try{body=JSON.parse(await boundedText(response))}
+      catch(error){throw Object.assign(error,{discoveryError:discoveryError(error,'body',key)})}
+      if(!Array.isArray(body.targets) || body.targets.length>200) {
+        const error=new Error('Invalid discovery response')
+        error.discoveryError=discoveryError(error,'contract',key)
+        throw error
+      }
       const pagination=body.pagination
       const paginated=pagination!==undefined
       if(paginated && (typeof pagination?.hasMore!=='boolean' ||
@@ -92,7 +112,10 @@ export async function discoverCommunity({ appUrl, endpoint, headers, signal, req
       const nextProgress={...currentProgress,[key]:{cursor:nextCursor,recent:nextRecent,complete:nextCursor===null}}
       // The worker checkpoints targets and cursor together before requesting
       // another page. A crash can repeat a GET, never skip uncommitted targets.
-      if(onPage) await onPage(pageTargets,nextProgress)
+      if(onPage) {
+        try{await onPage(pageTargets,nextProgress)}
+        catch(error){throw Object.assign(error,{discoveryError:discoveryError(error,'checkpoint',key)})}
+      }
       currentProgress=nextProgress
       targets.push(...pageTargets)
       count+=pageTargets.length
