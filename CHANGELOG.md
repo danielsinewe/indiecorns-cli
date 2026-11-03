@@ -12,6 +12,8 @@
 - Reuse an already-refreshed GitHub CLI token only for the same proven actor;
   reject account switches and never bypass provider throttling. Report failing
   sources as incomplete setup even when the service process is alive.
+- Expose structured worker commands in agent/Codex handoffs and update the bundled
+  skill so worker onboarding needs no extension setup.
 - Update posthog-node to 5.61.2; no new dependencies.
 
 ## 0.4.10 - 2026-11-02

@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises'
-import {discoveryError} from './discovery-errors.mjs'
+import {discoveryError,retryableTransportError} from './discovery-errors.mjs'
 
 export const discoverySources = [
   ...['peerlist', 'x', 'linkedin', 'producthunt'].map(platform => ({ platform, eventType: 'follow', targetSource: 'profiles' })),
@@ -65,7 +65,7 @@ export async function discoverCommunity({ appUrl, endpoint, headers, signal, req
           signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(30000)]) });break}
         catch(error){
           const failure=discoveryError(error,'request',key)
-          if(attempt===0&&!signal?.aborted&&['transport','timeout'].includes(failure.kind)&&!['CERT_HAS_EXPIRED','UNABLE_TO_VERIFY_LEAF_SIGNATURE'].includes(failure.code)) {
+          if(attempt===0&&!signal?.aborted&&retryableTransportError(failure)) {
             transportRetries.set(key,(transportRetries.get(key)??0)+1)
             await pause(1000,signal)
             continue

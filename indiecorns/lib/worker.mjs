@@ -134,8 +134,8 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
           state.sources=[]
         }
         state.lastPollAt = now()
-        const transient=['transport','timeout','server'].includes(state.discoveryError?.kind)
-        const ceiling=transient?300000:3600000
+        const requiresIntervention=state.lastError==='auth_required'||state.discoveryError?.kind==='storage'
+        const ceiling=requiresIntervention?3600000:300000
         state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, state.continuation && !state.lastError ? Math.min(intervalMs,5000) : Math.min(ceiling, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
       if (prioritize) {

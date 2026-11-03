@@ -139,3 +139,12 @@ test('a single bounded GET retry recovers a transient connection failure and rep
   assert.equal(calls,14);assert.equal(result.partial,false);assert.equal(result.sources[0].transportRetries,1);assert.equal(pauses[0],1000)
   assert.doesNotMatch(JSON.stringify(result),/private-message/)
 })
+
+test('certificate failures are classified without an immediate retry',async()=>{
+  for(const code of ['CERT_HAS_EXPIRED','DEPTH_ZERO_SELF_SIGNED_CERT','ERR_TLS_CERT_ALTNAME_INVALID']) {
+    let calls=0
+    await assert.rejects(discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async()=>assert.fail('must not retry'),
+      request:async()=>{calls++;throw Object.assign(new TypeError('secret'),{cause:{code}})}}))
+    assert.equal(calls,1)
+  }
+})

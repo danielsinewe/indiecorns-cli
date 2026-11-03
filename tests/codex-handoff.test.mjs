@@ -36,6 +36,11 @@ test("no-argument Codex runs return one concise next-step handoff", () => {
     assert.equal(handoff.nextAction.id, "login")
     assert.match(handoff.instruction, /verify completed CLI session/)
     assert.equal("setup" in handoff, false)
+    assert.equal(handoff.worker.requiresBrowserExtension,false)
+    assert.equal(handoff.worker.requiresLocalSlackCredential,false)
+    assert.ok(handoff.worker.setup.args.includes('--wait'))
+    assert.ok(handoff.worker.setup.args.includes('--ndjson'))
+    assert.equal(handoff.worker.defaultExternalAttemptsPerDay,1)
   } finally {
     rmSync(testHome, { recursive: true, force: true })
   }

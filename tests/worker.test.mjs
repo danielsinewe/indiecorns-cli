@@ -34,6 +34,8 @@ test('server failures have bounded recovery while explicit provider retry-after 
   try {
     const options={directory,once:true,intervalMs:300000,now:()=>clock,discover:async()=>({targets:[],partial:true,sources:[{status:'failed',httpStatus:502}]})}
     for(let n=0;n<10;n++){const s=await runWorker(options);assert.equal(s.nextPollAt-clock,300000);clock=s.nextPollAt}
+    const unknown=await runWorker({...options,discover:async()=>{throw new Error('private detail')}})
+    assert.equal(unknown.nextPollAt-clock,300000);clock=unknown.nextPollAt
     const limited=await runWorker({...options,discover:async()=>({targets:[],partial:true,sources:[{status:'rate_limited'}],retryAfterMs:7200000})})
     assert.equal(limited.nextPollAt-clock,7200000)
   }finally{rmSync(directory,{recursive:true})}

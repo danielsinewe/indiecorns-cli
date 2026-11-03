@@ -1510,6 +1510,14 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
       url: `${appUrl}/dashboard`,
       command: `npx indiecorns dashboard --no-open --app-url ${appUrl}`,
     },
+    worker: {
+      setup: {command:"npx",args:["--yes","indiecorns@latest","worker","setup","--mode","execute","--wait","--ndjson","--app-url",appUrl]},
+      check: {command:"npx",args:["--yes","indiecorns@latest","worker","setup","--check","--app-url",appUrl]},
+      health: {command:"npx",args:["--yes","indiecorns@latest","worker","health","--hours","24"]},
+      requiresBrowserExtension:false,requiresLocalSlackCredential:false,
+      requiresOwnAccountAuthorization:true,defaultExternalAttemptsPerDay:1,
+      completionEvidence:["matching_process_and_heartbeat","healthy_sources","preserved_account_bound_policy"],
+    },
     onboarding: {
       liveStatusLoaded: Boolean(plan),
       total: plan?.summary?.total ?? actions.length,
@@ -6585,6 +6593,7 @@ const runCodexHandoff = async (flags) => {
     },
     state: ready ? "ready" : "action_required",
     nextAction,
+    worker:report.agentPlan.worker,
     instruction: ready
       ? "Core setup is verified. Ask what the user wants to do in the Herd."
       : requiredInput
