@@ -41,8 +41,12 @@ export function inspectWorkerProcess(directory,{run=command,system=process.platf
   const health=readHealthReport(directory,{hours:1})
   const heartbeatMatches=health.latest?.pid===lock.pid&&health.latest?.session===lock.owner&&
     health.latestState==='recent_sample'&&health.latestAgeMs<=90000
+  const state=read(join(directory,'state.json'),null),at=Date.now()
+  const sourcesHealthy=state?.lastError===null&&Number.isFinite(state.lastSuccessAt)&&state.lastSuccessAt<=at&&at-state.lastSuccessAt<=900000&&
+    (!state.communityFeed||state.communityFeed.health==='ok'&&state.communityFeed.snapshot?.expiresAt>at)&&
+    (!state.githubMemberPosts||['ok','paging','credential_required','membership_required'].includes(state.githubMemberPosts.health))
   return {registered:true,running:Boolean(matches&&heartbeatMatches),processMatches:Boolean(matches),
-    heartbeatMatches:Boolean(heartbeatMatches),pid:lock.pid,appUrl:registration.appUrl??'https://app.indiecorns.com',
+    heartbeatMatches:Boolean(heartbeatMatches),sourcesHealthy,pid:lock.pid,appUrl:registration.appUrl??'https://app.indiecorns.com',
     health:health.latestState}
 }
 
@@ -84,22 +88,46 @@ async function setup({directory,appUrl,headers,accountRevision,mode='draft',chec
   step('policy',existing?'preserved':check?'planned':'created',{mode:policy.mode,maxExternalPerDay:policy.maxExternalPerDay,accountMatches:bindingMatches})
   if(!bindingMatches){result.state='account_policy_mismatch';return result}
   let token=credential(directory,'github',environment),source=token?'configured':null,githubVerified=false
-  if(!token) {
+  let githubIdentity
+  const identityPath=join(directory,'github-identity.json')
+  const previousIdentity=read(identityPath,null)
+  const receiptActorIds=[...new Set(Object.values(read(join(directory,'state.json'),{}).actions??{}).map(a=>a.authorization?.githubActorId).filter(id=>Number.isSafeInteger(id)&&id>0))]
+  const previousActorId=previousIdentity?.accountRevision===accountRevision?previousIdentity.id:receiptActorIds.length===1?receiptActorIds[0]:null
+  const ghToken=()=>{
     const gh=run('gh',['auth','token','--hostname','github.com'])
-    if(gh.status===0&&typeof gh.stdout==='string'&&gh.stdout.trim()&&!/\s/.test(gh.stdout.trim())&&gh.stdout.trim().length<=16384){token=gh.stdout.trim();source='github_cli'}
+    return gh.status===0&&typeof gh.stdout==='string'&&gh.stdout.trim()&&!/\s/.test(gh.stdout.trim())&&gh.stdout.trim().length<=16384?gh.stdout.trim():null
+  }
+  if(!token) {
+    token=ghToken()
+    if(token)source='github_cli'
   }
   if(token) {
     try {
-      const {data,headers:providerHeaders}=await githubJson('/user',{token,request})
+      let proof
+      try{proof=await githubJson('/user',{token,request})}
+      catch(error) {
+        // Reuse a refreshed gh login only with proof of the SAME actor. Never
+        // switch accounts or bypass rate limiting to repair an expired token.
+        if(error.code!=='GITHUB_PERMISSION_REQUIRED'||!previousActorId||environment.INDIECORNS_GITHUB_TOKEN)throw error
+        const renewed=ghToken()
+        if(!renewed||renewed===token)throw error
+        proof=await githubJson('/user',{token:renewed,request})
+        if(proof.data?.id!==previousActorId)throw Object.assign(new Error('GitHub actor changed'),{code:'GITHUB_ACTOR_CHANGED'})
+        token=renewed;source='github_cli_refreshed'
+      }
+      const {data,headers:providerHeaders}=proof
       if(!Number.isSafeInteger(data?.id)||data.id<1||! /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i.test(data.login??''))throw new Error('Invalid GitHub actor')
       githubVerified=true
+      githubIdentity={version:1,id:data.id,username:data.login.toLowerCase(),accountRevision}
       const scopes=providerHeaders.get('x-oauth-scopes')?.split(',').map(s=>s.trim())
       const required=scopes&&((policy.githubMemberActions.includes('follow')&&!scopes.includes('user:follow')&&!scopes.includes('user'))||
         (policy.githubMemberActions.includes('star')&&!scopes.includes('public_repo')&&!scopes.includes('repo')))
       step('github',required?'permissions_required':'verified',{source,actor:{id:data.id,username:data.login},permissions:scopes?'scope_headers_checked':'provider_enforced',
         ...(required?{nextCommand:'gh auth refresh --hostname github.com --scopes user:follow,public_repo'}:{})})
       if(required)githubVerified=false
-    } catch {step('github','authentication_required',{nextCommand:'gh auth login --hostname github.com --scopes user:follow,public_repo'})}
+    } catch(error) {step('github',error.code==='GITHUB_ACTOR_CHANGED'?'account_mismatch':'authentication_required',{
+      ...(error.code==='GITHUB_ACTOR_CHANGED'?{expectedActorId:previousActorId}:{}),
+      nextCommand:'gh auth login --hostname github.com --scopes user:follow,public_repo'})}
   } else step('github','authentication_required',{nextCommand:'gh auth login --hostname github.com --scopes user:follow,public_repo'})
   const process=inspect()
   if(process.registered&&process.appUrl!==appUrl) {step('service','app_mismatch');return result}
@@ -110,20 +138,26 @@ async function setup({directory,appUrl,headers,accountRevision,mode='draft',chec
     // Existing source choices are intentional and never silently overwritten.
     if(!existsSync(join(directory,'slack-settings.json')))saveState(join(directory,'slack-settings.json'),{source:'community'})
     if(githubVerified&&token!==credential(directory,'github',{}))storeCredential(directory,'github',token)
+    if(githubVerified&&JSON.stringify(previousIdentity)!==JSON.stringify(githubIdentity))saveState(identityPath,githubIdentity)
   }
-  if(process.running)step('service','running',{pid:process.pid,preserved:true})
+  if(process.running) {
+    step('service','running',{pid:process.pid,preserved:true})
+    if(process.sourcesHealthy===false)step('source_health','unhealthy',{nextCommand:'indiecorns worker status'})
+  }
   else if(process.registered||process.unmanagedProcessPresent)step('service','attention_required',{nextCommand:'indiecorns worker service-status'})
   else if(check)step('service','not_installed',{nextCommand:`indiecorns worker setup --mode ${policy.mode}`})
   else {
     await install()
     let started=inspect()
-    for(let n=0;!started.running&&n<10;n++){await wait(1000);started=inspect()}
+    for(let n=0;(!started.running||started.sourcesHealthy===false)&&n<10;n++){await wait(1000);started=inspect()}
     step('service',started.running?'running':'starting',{...(started.running?{pid:started.pid}:{}),nextCommand:'indiecorns worker setup --check'})
+    if(started.running&&started.sourcesHealthy===false)step('source_health','unhealthy',{nextCommand:'indiecorns worker status'})
   }
   const running=result.steps.some(s=>s.id==='service'&&s.status==='running')
   const credentialNeedsSaving=githubVerified&&token!==credential(directory,'github',{})
   result.state=check&&(!existing||credentialNeedsSaving)?'setup_required':
-    running?(policy.mode==='execute'&&!githubVerified?'running_with_action_requirements':'ready'):check?'setup_required':'action_required'
+    running?(result.steps.some(s=>s.id==='source_health'&&s.status==='unhealthy')?'running_with_source_requirements':
+      policy.mode==='execute'&&!githubVerified?'running_with_action_requirements':'ready'):check?'setup_required':'action_required'
   if(check&&credentialNeedsSaving)step('background_credential','save_required',{nextCommand:`indiecorns worker setup --mode ${policy.mode}`})
   result.capabilities={discovery:true,slackPriority:true,githubActions:policy.mode==='execute'&&githubVerified,
     producthuntActions:false,otherPlatformActions:false}

@@ -8,6 +8,7 @@ import { acquireWorkerGuard } from './worker-lock.mjs'
 import { startHealthMonitor } from './health.mjs'
 import { githubIssue } from './github-issues.mjs'
 import {configureStorageBudget,reserveStorageWrite} from './storage.mjs'
+import {safeDiscoveryError} from './discovery-errors.mjs'
 
 const read = (path, fallback) => {
   try { return JSON.parse(readFileSync(path, 'utf8')) }
@@ -60,7 +61,7 @@ export function enqueue(state, targets, now) {
   }
 }
 export async function runWorker({ directory, discover, once = false, intervalMs = 300000,
-  signal, now = Date.now, onCycle = () => {}, authRevision, discoveryRevision, observe, deriveTargets, derivationRevision = 1, act, prioritize, observationLimit = 5 }) {
+  signal, now = Date.now, onCycle = () => {}, authRevision, authRevisionAliases=[], discoveryRevision, observe, deriveTargets, derivationRevision = 1, act, prioritize, observationLimit = 5 }) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1000) throw new Error('Interval must be at least 1000ms')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const releaseGuard=await acquireWorkerGuard(directory)
@@ -86,6 +87,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
     if (state.version !== 1 || !state.jobs) throw new Error('Unsupported worker state')
     attachBacklog(state,directory,saveState)
     health=startHealthMonitor({directory,session:owner,state,now,onStatus:status=>{state.healthHistoryStatus=status}})
+    if(authRevision&&authRevisionAliases.includes(state.authRevision))state.authRevision=authRevision
     if (authRevision && state.authRevision !== authRevision) {
       state.nextPollAt = 0
       state.discovery = {}
@@ -116,14 +118,26 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
           state.continuation = result.continuation === true
           if (!state.partial) state.lastSuccessAt = now()
           state.lastError = state.partial && !state.continuation ? 'partial_discovery' : null
+          state.discoveryError=null
+          const unavailable=state.sources.find(source=>source.status==='failed'&&Number.isInteger(source.httpStatus)&&source.httpStatus>=500&&source.httpStatus<=599)
+          if(unavailable) {
+            state.discoveryError={kind:'server',stage:'request',httpStatus:unavailable.httpStatus,at:now()}
+            state.discoveryFailures=[...(state.discoveryFailures??[]),state.discoveryError].slice(-24)
+          }
         } catch (error) {
           if (signal?.aborted) break
           state.failures++
           // Persist only classified errors, never tokens, response bodies or URLs.
           state.lastError = error.code === 'AUTH_REQUIRED' ? 'auth_required' : error.code === 'QUEUE_CAPACITY' ? 'queue_capacity' : 'discovery_failed'
+          state.discoveryError={...safeDiscoveryError(error),at:now()}
+          state.discoveryFailures=[...(state.discoveryFailures??[]),state.discoveryError].slice(-24)
+          // Old successful source rows must not masquerade as the failed poll.
+          state.sources=[]
         }
         state.lastPollAt = now()
-        state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, state.continuation && !state.lastError ? Math.min(intervalMs,5000) : Math.min(3600000, intervalMs * 2 ** Math.min(state.failures, 10)))
+        const requiresIntervention=state.lastError==='auth_required'||state.discoveryError?.kind==='storage'
+        const ceiling=requiresIntervention?3600000:300000
+        state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, state.continuation && !state.lastError ? Math.min(intervalMs,5000) : Math.min(ceiling, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
       if (prioritize) {
         health.progress('prioritize')

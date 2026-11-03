@@ -4,8 +4,58 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runWorker, workerStatus, targetKey } from '../indiecorns/lib/worker.mjs'
+import {discoverCommunity} from '../indiecorns/lib/discovery.mjs'
+import {credentialRevision} from '../indiecorns/lib/auth-context.mjs'
+import {createHash} from 'node:crypto'
 const target = (path, slackMember = false) => ({ platform: 'x', eventType: 'like', profileUrl: `https://x.com/${path}`, slackMember })
 const fixture = () => mkdtempSync(join(tmpdir(), 'indiecorns-worker-'))
+
+test('CLI metadata upgrades migrate authentication identity without resetting provider cooldowns or progress',async()=>{
+  const directory=fixture(),oldHeaders={Authorization:'Bearer same-secret','x-indiecorns-cli-version':'0.4.10'},newHeaders={...oldHeaders,'x-indiecorns-cli-version':'0.4.11'}
+  const legacy=createHash('sha256').update(JSON.stringify(oldHeaders)).digest('hex')
+  assert.equal(credentialRevision(oldHeaders),credentialRevision(newHeaders))
+  try {
+    await runWorker({directory,once:true,now:()=>1000,authRevision:legacy,discover:async()=>({targets:[],partial:true,retryAfterMs:7200000,sources:[],progress:{page:{cursor:'saved'}}})})
+    let requests=0
+    const preserved=await runWorker({directory,once:true,now:()=>2000,authRevision:credentialRevision(newHeaders),authRevisionAliases:[legacy],discover:async()=>{requests++;return []}})
+    assert.equal(requests,0);assert.equal(preserved.nextPollAt,7201000);assert.equal(preserved.discovery.page.cursor,'saved')
+    const changed=await runWorker({directory,once:true,now:()=>3000,authRevision:credentialRevision({Authorization:'Bearer changed-secret'}),authRevisionAliases:[legacy],discover:async()=>{requests++;return []}})
+    assert.equal(requests,1);assert.equal(changed.lastError,null)
+  }finally{rmSync(directory,{recursive:true})}
+})
+
+test('persistent transport failures retry within five minutes, survive restart and recover without resetting receipts',async()=>{
+  const directory=fixture();let clock=1000,calls=0,offline=true
+  const options={directory,once:true,intervalMs:300000,now:()=>clock,discover:()=>discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async()=>{},
+    request:async()=>{calls++;if(offline)throw Object.assign(new TypeError('secret-token'),{cause:{code:'ECONNRESET'}});return Response.json({targets:[]})}})}
+  try {
+    for(let n=0;n<30;n++){
+      const failed=await runWorker(options)
+      assert.equal(failed.nextPollAt-clock,300000)
+      assert.equal(failed.discoveryError.kind,'transport');assert.equal(failed.discoveryError.code,'ECONNRESET');assert.deepEqual(failed.sources,[])
+      const count=calls;await runWorker(options);assert.equal(calls,count)
+      clock=failed.nextPollAt
+    }
+    const persisted=workerStatus(directory).state
+    persisted.actions={original:{kind:'github_star',status:'completed',completedAt:1}};persisted.actionBudget={day:'2026-11-03',attempts:1}
+    writeFileSync(join(directory,'state.json'),JSON.stringify(persisted))
+    offline=false;const recovered=await runWorker(options)
+    assert.equal(recovered.lastError,null);assert.equal(recovered.discoveryError,null);assert.equal(recovered.actions.original.completedAt,1);assert.equal(recovered.actionBudget.attempts,1)
+    assert.equal(recovered.discoveryFailures.length,24);assert.doesNotMatch(JSON.stringify(recovered),/secret-token/)
+  }finally{rmSync(directory,{recursive:true})}
+})
+
+test('server failures have bounded recovery while explicit provider retry-after remains honored',async()=>{
+  const directory=fixture();let clock=1000
+  try {
+    const options={directory,once:true,intervalMs:300000,now:()=>clock,discover:async()=>({targets:[],partial:true,sources:[{status:'failed',httpStatus:502}]})}
+    for(let n=0;n<10;n++){const s=await runWorker(options);assert.equal(s.nextPollAt-clock,300000);clock=s.nextPollAt}
+    const unknown=await runWorker({...options,discover:async()=>{throw new Error('private detail')}})
+    assert.equal(unknown.nextPollAt-clock,300000);clock=unknown.nextPollAt
+    const limited=await runWorker({...options,discover:async()=>({targets:[],partial:true,sources:[{status:'rate_limited'}],retryAfterMs:7200000})})
+    assert.equal(limited.nextPollAt-clock,7200000)
+  }finally{rmSync(directory,{recursive:true})}
+})
 
 test('queue persists across restart, deduplicates, and prioritizes explicit Slack membership', async () => {
   const directory = fixture()

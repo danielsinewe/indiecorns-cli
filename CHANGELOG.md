@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.11 - 2026-11-03
+
+- Diagnose discovery failures with bounded, sanitized error metadata and retry
+  transient transport/timeouts/5xx failures within five minutes while preserving
+  provider cooldowns, queued progress, receipts and health history.
+- Recover a transient GET failure with one bounded retry and report the retry;
+  do not immediately retry rate limits or certificate failures.
+- Keep credential identity stable across version metadata changes and migrate
+  matching legacy bindings without clearing cursors or provider cooldowns.
+- Add `worker setup --wait --ndjson` to continue automatically after device
+  authorization and preserve requested setup mode across resumptions.
+- Reuse an already-refreshed GitHub CLI token only for the same proven actor;
+  reject account switches and never bypass provider throttling. Report failing
+  sources as incomplete setup even when the service process is alive.
+- Expose structured worker commands in agent/Codex handoffs and update the bundled
+  skill so worker onboarding needs no extension setup.
+- Update posthog-node to 5.61.2; no new dependencies.
+
 ## 0.4.10 - 2026-11-02
 
 - Bound worker data writes to 128 MiB by default, counting atomic replacement

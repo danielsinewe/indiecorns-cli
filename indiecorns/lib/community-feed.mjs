@@ -2,14 +2,17 @@ import {createHash} from 'node:crypto'
 import {boundedText,retryDelay} from './discovery.mjs'
 import {validateSlackEvidence} from './slack.mjs'
 import {enqueue} from './worker.mjs'
+import {credentialContext} from './auth-context.mjs'
 
 // Community authentication authorizes this feed. Provider credentials remain on
 // the community server; clients retain only membership proof and link jobs.
 export async function syncCommunityFeed({state,appUrl,endpoint='/api/community/worker-feed',headers,
-  signal,request=fetch,now=Date.now,checkpoint=()=>{}}) {
+  signal,request=fetch,now=Date.now,checkpoint=()=>{},headerAliases=[]}) {
   const url=new URL(endpoint,appUrl)
   if(url.origin!==new URL(appUrl).origin)throw new Error('Invalid community feed origin')
-  const binding=createHash('sha256').update(JSON.stringify([url.href,headers])).digest('hex')
+  const binding=createHash('sha256').update(JSON.stringify([url.href,credentialContext(headers)])).digest('hex')
+  const legacy=[headers,...headerAliases].map(h=>createHash('sha256').update(JSON.stringify([url.href,h])).digest('hex'))
+  if(legacy.includes(state.communityFeed?.binding))state.communityFeed.binding=binding
   if(state.communityFeed?.binding!==binding)state.communityFeed={binding,cursor:'',oldest:'0',latest:'0.000000',nextPollAt:0}
   const feed=state.communityFeed
   if(feed.nextPollAt>now())return feed.snapshot??null

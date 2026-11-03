@@ -29,6 +29,7 @@ import { readHealthReport } from "../lib/health.mjs"
 import { syncGithubMemberPosts } from "../lib/github-member-posts.mjs"
 import { setupWorker } from "../lib/onboarding.mjs"
 import {storageSettings,directoryBytes} from "../lib/storage.mjs"
+import {credentialRevision} from "../lib/auth-context.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -129,6 +130,7 @@ Commands:
   worker run [--once]            Poll community targets durably in the background
   worker setup [--mode execute]  Configure Slack priority, GitHub and background startup
   worker setup --check           Read-only onboarding and service diagnosis
+  worker setup --wait --ndjson   Continue through device sign-in without rerunning setup
   worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
@@ -1508,6 +1510,14 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
     dashboard: {
       url: `${appUrl}/dashboard`,
       command: `npx indiecorns dashboard --no-open --app-url ${appUrl}`,
+    },
+    worker: {
+      setup: {command:"npx",args:["--yes","indiecorns@latest","worker","setup","--mode","execute","--wait","--ndjson","--app-url",appUrl]},
+      check: {command:"npx",args:["--yes","indiecorns@latest","worker","setup","--check","--app-url",appUrl]},
+      health: {command:"npx",args:["--yes","indiecorns@latest","worker","health","--hours","24"]},
+      requiresBrowserExtension:false,requiresLocalSlackCredential:false,
+      requiresOwnAccountAuthorization:true,defaultExternalAttemptsPerDay:1,
+      completionEvidence:["matching_process_and_heartbeat","healthy_sources","preserved_account_bound_policy"],
     },
     onboarding: {
       liveStatusLoaded: Boolean(plan),
@@ -3049,7 +3059,7 @@ const runBrowserAuth = async (flags, mode = "login") => {
   })
 
   if (flags.json) {
-    printJson({
+    const result={
       status: "browser_auth_required",
       mode,
       url: authUrl.toString(),
@@ -3057,7 +3067,9 @@ const runBrowserAuth = async (flags, mode = "login") => {
       expiresAt: cliSession.expires_at ?? undefined,
       message: `Open the ${mode} URL to continue with Indiecorns.`,
       ...(flags.resumeCommand?{resumeCommand:flags.resumeCommand}:{}),
-    })
+    }
+    if(flags.returnAuthResult)return result
+    printJson(result)
     return 0
   }
 
@@ -6582,6 +6594,7 @@ const runCodexHandoff = async (flags) => {
     },
     state: ready ? "ready" : "action_required",
     nextAction,
+    worker:report.agentPlan.worker,
     instruction: ready
       ? "Core setup is verified. Ask what the user wants to do in the Herd."
       : requiredInput
@@ -6598,6 +6611,9 @@ const main = async () => {
   switch (command) {
     case "worker": {
       const directory = join(configDir, "worker")
+      const registrationFile=join(directory,"service-runtime.json")
+      const previousVersion=flags["previous-version"]??(existsSync(registrationFile)?JSON.parse(readFileSync(registrationFile,"utf8")).previousVersion:null)
+      const workerHeaderAliases=()=>previousVersion&&getCliAuthHeaders()?[{...getCliAuthHeaders(),"x-indiecorns-cli-version":previousVersion}]:[]
       const slackPath = join(directory, "slack-evidence.json")
       const slackSettingsPath = join(directory, "slack-settings.json")
       let memberSnapshot = null
@@ -6617,7 +6633,7 @@ const main = async () => {
         const token = useCommunity ? null : localToken
         if (useCommunity) {
           snapshot = await syncCommunityFeed({state,signal,checkpoint,appUrl:getAppUrl(flags),
-            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:getCliAuthHeaders()})
+            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:getCliAuthHeaders(),headerAliases:workerHeaderAliases()})
           state.slackSource = "community_feed"
         } else state.slackSource = "local_slack"
         if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
@@ -6709,10 +6725,14 @@ const main = async () => {
         assertWorkerRuntime()
         const registrationPath=join(directory,"service-runtime.json")
         const previous=existsSync(registrationPath)?JSON.parse(readFileSync(registrationPath,"utf8")):null
+        let previousVersion
+        if(previous?.cli) {
+          try{previousVersion=JSON.parse(readFileSync(resolve(dirname(previous.cli),"../../package.json"),"utf8")).version}catch{}
+        }
         const runtime=prepareServiceRuntime({cli:fileURLToPath(import.meta.url)})
-        const result=manageService("install",{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),interval:Number(flags["interval-seconds"]??300)})
+        const result=manageService("install",{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),previousVersion,interval:Number(flags["interval-seconds"]??300)})
         mkdirSync(directory,{recursive:true,mode:0o700})
-        saveState(registrationPath,{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),managed:runtime.managed,runtimeDirectory:runtime.directory,registeredAt:Date.now()})
+        saveState(registrationPath,{cli:runtime.cli,node:process.execPath,appUrl:getAppUrl(flags),managed:runtime.managed,runtimeDirectory:runtime.directory,registeredAt:Date.now(),...(previousVersion?{previousVersion}:{})})
         if(runtime.managed) {
           try{pruneManagedRuntimes({active:runtime.directory,previous:previous?.runtimeDirectory})}
           catch{result.runtimeCleanup="deferred"}
@@ -6721,25 +6741,42 @@ const main = async () => {
       }
       if(args[0]==="setup") {
         assertWorkerRuntime()
-        if(!["draft","collect","execute"].includes(flags.mode??"draft"))throw new Error("Setup mode must be collect, draft or execute")
+        const setupMode=flags.mode??(!getCliAuthHeaders()?readConfig().pendingCliSession?.workerSetupMode:undefined)??"draft"
+        if(!["draft","collect","execute"].includes(setupMode))throw new Error("Setup mode must be collect, draft or execute")
+        if(flags.wait&&!flags.ndjson)throw new Error("Use --wait --ndjson to stream the authorization URL and continue setup automatically")
+        const timeoutSeconds=Number(flags.timeout??180)
+        if(flags.wait&&(!Number.isInteger(timeoutSeconds)||timeoutSeconds<1||timeoutSeconds>900))throw new Error("Setup wait timeout must be between 1 and 900 seconds")
         const shellQuote=value=>`'${String(value).replace(/'/g,"'\\''")}'`
-        const resumeCommand=`indiecorns worker setup --mode ${flags.mode??"draft"}${getAppUrl(flags)!==DEFAULT_APP_URL?` --app-url ${shellQuote(getAppUrl(flags))}`:""}`
+        const resumeCommand=`indiecorns worker setup --mode ${setupMode}${getAppUrl(flags)!==DEFAULT_APP_URL?` --app-url ${shellQuote(getAppUrl(flags))}`:""}`
+        let authorization
         // Resume the existing device handoff without opening or selecting a browser.
         if(!getCliAuthHeaders()&&!flags.check&&readConfig().pendingCliSession) {
           const pending=readConfig().pendingCliSession
           const session=await pollCliSession(pending)
           if(session.status==="completed")saveCompletedSession({appUrl:pending.appUrl,session,id:pending.id,secret:pending.secret})
           else if(!["expired","not_found"].includes(session.status)&&pending.verificationUrl) {
-            printJson({status:"browser_auth_required",url:pending.verificationUrl,resumeCommand})
-            return 1
+            authorization={status:"browser_auth_required",url:pending.verificationUrl,resumeCommand}
           }
         }
         if(!getCliAuthHeaders()&&!flags.check) {
-          await runBrowserAuth({...flags,json:true,"no-open":true,resumeCommand})
-          return 1
+          authorization??=await runBrowserAuth({...flags,json:true,"no-open":true,resumeCommand,returnAuthResult:true})
+          writeConfig({...readConfig(),pendingCliSession:{...readConfig().pendingCliSession,workerSetupMode:setupMode}})
+          if(!flags.wait) {
+            if(flags.ndjson)printNdjson({type:"worker.setup.authorization_required",...authorization})
+            else printJson(authorization)
+            return 1
+          }
+          printNdjson({type:"worker.setup.authorization_required",...authorization})
+          const pending=readConfig().pendingCliSession
+          const completed=await waitForAppCliSession({appUrl:pending.appUrl,id:pending.id,secret:pending.secret,session:pending,timeoutSeconds})
+          if(completed.status!=="completed") {
+            printNdjson({type:"worker.setup.action_required",status:completed.status,resumeCommand})
+            return 1
+          }
+          printNdjson({type:"worker.setup.authenticated"})
         }
         const output=await setupWorker({directory,appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),accountRevision:accountRevision(),
-          mode:flags.mode??"draft",check:Boolean(flags.check),install:installWorkerService,
+          mode:setupMode,check:Boolean(flags.check),install:installWorkerService,
           persistAuth:()=>{
             // launchd/systemd/Task Scheduler do not inherit this terminal's token.
             // Bind the durable session to the same account revision as the env token.
@@ -6749,7 +6786,8 @@ const main = async () => {
             }})
           },
         })
-        printJson(output)
+        if(flags.ndjson)printNdjson({type:"worker.setup.completed",...output})
+        else printJson(output)
         return output.state==="ready"?0:1
       }
       if (args[0] === "credentials") {
@@ -6821,7 +6859,8 @@ const main = async () => {
       try {
         const state = await runWorker({
           directory,
-          authRevision: createHash("sha256").update(JSON.stringify(getCliAuthHeaders())).digest("hex"),
+          authRevision: credentialRevision(getCliAuthHeaders()),
+          authRevisionAliases: [getCliAuthHeaders(),...workerHeaderAliases()].map(headers=>createHash("sha256").update(JSON.stringify(headers)).digest("hex")),
           discoveryRevision: "community-13-pages-v2",
           once: Boolean(flags.once),
           intervalMs: Number(flags["interval-seconds"] ?? 300) * 1000,

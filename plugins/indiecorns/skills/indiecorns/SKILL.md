@@ -10,6 +10,30 @@ OpenClaw, or another coding agent.
 
 ## Preferred CLI Entry Points
 
+For continuous discovery and automated community support, use the worker path:
+
+```bash
+npx --yes indiecorns@latest worker setup --mode execute --wait --ndjson
+npx --yes indiecorns@latest worker setup --check
+npx --yes indiecorns@latest worker health --hours 24
+```
+
+The `worker` field in `agent` and Codex handoff JSON supplies structured command
+arguments. This path needs no browser extension or local Slack app credential.
+Setup streams a device authorization URL and continues in the same process after
+the member authorizes their own account. Follow the host's permitted-browser
+rules and keep the CLI process running while completing that handoff. A member's
+provider authorization cannot be granted by another member. Missing GitHub login
+or scopes remain explicit requirements; do not invent credentials or memberships.
+Reused refreshed GitHub credentials must match the previously proven actor.
+
+Verify setup's current process, heartbeat and source status. A running process
+alone does not prove healthy discovery. Preserve existing policies, queues,
+receipts, quotas and health history. Do not reinstall a healthy service merely
+for proof or expand engagement scopes to force a test. A full-day claim needs
+actual continuous healthy recorded coverage; never reset failed samples. Report
+other members' installations and unsupported platforms as unverified until tested.
+
 Run the local checkout CLI when the current workspace is the Indiecorns repo:
 
 ```bash

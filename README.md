@@ -214,7 +214,7 @@ MIT.
 Every community member can use the same command on their own computer:
 
 ```bash
-npx --yes indiecorns@latest worker setup --mode execute
+npx --yes indiecorns@latest worker setup --mode execute --wait --ndjson
 ```
 
 Setup verifies the Indiecorns session and fresh community Slack feed, reuses an
@@ -226,11 +226,19 @@ New execute policies enable only fresh verified Slack-member GitHub follows and
 stars, capped at **one external attempt per UTC day**. Omit `--mode execute` to
 collect observations and local briefs without external actions.
 
-If community login is missing, setup returns a device sign-in URL without opening
-a browser. Complete that authorization and rerun the returned resume command;
-pending handoffs are reused. If GitHub login is missing or under-scoped, the
+If community login is missing, setup streams a device sign-in URL without opening
+a browser. After the member authorizes it, the waiting command automatically
+continues through account verification and service setup. No second terminal
+command is required. The default wait is 180 seconds (`--timeout` accepts 1–900).
+Omit `--wait --ndjson` for a single JSON response and a resumable command. Pending
+handoffs preserve their requested mode and are reused after timeout or restart.
+If GitHub login is missing or under-scoped, the
 discovery service can still run and the JSON result includes the precise GitHub
-authorization command. Provider consent cannot be granted by another member.
+authorization command. A stored token that expires can be replaced from an
+already-refreshed GitHub CLI login only after verifying the same previously
+proven numeric actor. Checks never save a replacement, account switches are
+rejected and provider rate limits never trigger credential switching. Provider
+consent cannot be granted by another member.
 GitHub's scope headers are checked when available; providers enforce actual
 resource permissions when an action is attempted. Authentication is not proof of
 every permitted write.
@@ -248,7 +256,8 @@ indiecorns worker health --hours 24
 
 `--check` performs read-only provider and OS checks and never stores credentials,
 creates policy, starts login, installs or restarts a service. Setup outputs JSON
-and exits nonzero when setup or authorization remains incomplete. `ready` means
+and exits nonzero when setup or authorization remains incomplete. A live process
+with failing sources returns `running_with_source_requirements`. `ready` means
 the configured worker and supported GitHub setup are ready; Product Hunt and other
 platforms are reported separately and are not implicitly enabled. Slack roster
 membership and mapped profiles are reported separately: missing identity links
@@ -280,7 +289,19 @@ scan restarts from the beginning on the normal polling interval. Older backends
 still work, with full unpaginated pages reported as incomplete discovery. The worker
 persists a local
 queue in `~/.indiecorns/worker/state.json`, deduplicates targets across restarts,
-and uses exponential backoff for failed requests. SIGINT and SIGTERM release
+and uses exponential backoff for failed requests. Each GET can retry a transient
+transport failure once after one second; successful retries are counted in the
+source report. HTTP rate limits and certificate failures never trigger that
+immediate retry. Transport/DNS/connection,
+timeout and HTTP 5xx failures have a five-minute recovery ceiling; explicit
+provider Retry-After delays remain honored. A bounded 24-entry diagnostic history
+records whitelisted failure kind, stage, source key, network code or HTTP status.
+It never stores exception messages, URLs, response bodies or tokens. Failed polls
+clear stale successful source rows; a healthy subsequent poll clears the active
+error while retaining diagnostic history. SIGINT and SIGTERM release
+the process guard. CLI version metadata does not change credential identity;
+upgrades preserve matching discovery/feed cursors and provider cooldowns. The
+worker handles SIGINT and SIGTERM by releasing
 ownership cleanly. A dedicated SQLite exclusive transaction provides process
 ownership; the OS releases it after a forced crash. The PID file is diagnostic,
 so losing it or reusing a dead worker's PID cannot admit a second worker or block
