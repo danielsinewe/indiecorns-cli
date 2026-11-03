@@ -73,7 +73,11 @@ export async function discoverCommunity({ appUrl, endpoint, headers, signal, req
           throw Object.assign(error,{discoveryError:failure})
         }
       }
-      if ([401,403].includes(response.status)) throw Object.assign(new Error('Authentication required'),{code:'AUTH_REQUIRED'})
+      if ([401,403].includes(response.status)) {
+        await response.body?.cancel()
+        throw Object.assign(new Error('Authentication required'),{code:'AUTH_REQUIRED',
+          discoveryError:{kind:'authentication',stage:'request',source:key,httpStatus:response.status}})
+      }
       if ([429,503].includes(response.status)) {
         const retryAfterMs=retryDelay(response.headers.get('retry-after'))
         await response.body?.cancel()

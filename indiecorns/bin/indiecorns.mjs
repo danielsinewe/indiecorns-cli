@@ -6777,6 +6777,7 @@ const main = async () => {
         }
         const output=await setupWorker({directory,appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),accountRevision:accountRevision(),
           mode:setupMode,check:Boolean(flags.check),install:installWorkerService,
+          retryForMs:flags.wait?timeoutSeconds*1000:0,onProgress:event=>{if(flags.ndjson)printNdjson(event)},
           persistAuth:()=>{
             // launchd/systemd/Task Scheduler do not inherit this terminal's token.
             // Bind the durable session to the same account revision as the env token.

@@ -7,7 +7,7 @@ const kinds=new Set(['transport','timeout','invalid_response','authentication','
 // can contain credentials or private content and never enter persisted state.
 export function discoveryError(error,stage='request',source) {
   const code=[error,error?.cause,error?.cause?.cause,...(Array.isArray(error?.cause?.errors)?error.cause.errors.slice(0,8):[])].map(e=>e?.code).find(code=>networkCodes.has(code))
-  const kind=error?.code==='AUTH_REQUIRED'?'authentication':error?.code==='STORAGE_CAPACITY'?'storage':
+  const kind=['AUTH_REQUIRED','auth_required'].includes(error?.code)?'authentication':error?.code==='STORAGE_CAPACITY'?'storage':
     error?.name==='TimeoutError'||code?.includes('TIMEOUT')||code==='ETIMEDOUT'?'timeout':code||stage==='request'&&error?.name==='TypeError'?'transport':
     stage==='body'||stage==='contract'?'invalid_response':'unknown'
   return {kind,stage:stages.has(stage)?stage:'request',...(code?{code}:{}),
@@ -17,5 +17,6 @@ export function safeDiscoveryError(error) {
   const candidate=error?.discoveryError
   if(!candidate||!kinds.has(candidate.kind)||!stages.has(candidate.stage))return discoveryError(error)
   return {...discoveryError(error,candidate.stage,candidate.source),kind:candidate.kind,
+    ...(Number.isInteger(candidate.httpStatus)&&candidate.httpStatus>=100&&candidate.httpStatus<=599?{httpStatus:candidate.httpStatus}:{}),
     ...(networkCodes.has(candidate.code)?{code:candidate.code}:{})}
 }

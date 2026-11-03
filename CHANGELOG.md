@@ -1,3 +1,9 @@
+## 0.4.12
+
+- Waiting worker setup automatically retries temporary community-service failures within its timeout and honors provider cooldowns. Service outages no longer tell members to sign in again.
+- Preserve exact sanitized authentication HTTP status and discovery source; community feed failures retain safe diagnostics.
+- Existing live queue, policy, credentials, receipts and daily quotas remain unchanged.
+
 # Changelog
 
 ## 0.4.11 - 2026-11-03
