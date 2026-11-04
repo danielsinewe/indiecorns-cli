@@ -29,6 +29,7 @@ import { readHealthReport } from "../lib/health.mjs"
 import { syncGithubMemberPosts } from "../lib/github-member-posts.mjs"
 import { setupWorker } from "../lib/onboarding.mjs"
 import { setupStepText, setupSummary, healthText } from "../lib/worker-ui.mjs"
+import { workerEvidenceHeader, reportWorkerInstallation } from "../lib/installation-evidence.mjs"
 import {storageSettings,directoryBytes} from "../lib/storage.mjs"
 import {credentialRevision} from "../lib/auth-context.mjs"
 
@@ -6634,8 +6635,10 @@ const main = async () => {
         const useCommunity = mode === "community" || (mode === "auto" && (!localToken || !snapshot))
         const token = useCommunity ? null : localToken
         if (useCommunity) {
+          const headers=getCliAuthHeaders()
+          const proof=workerEvidenceHeader(directory,{headers,version:getCliVersion()})
           snapshot = await syncCommunityFeed({state,signal,checkpoint,appUrl:getAppUrl(flags),
-            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:getCliAuthHeaders(),headerAliases:workerHeaderAliases()})
+            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:proof?{...headers,"x-indiecorns-worker-evidence":proof}:headers,headerAliases:workerHeaderAliases()})
           state.slackSource = "community_feed"
         } else state.slackSource = "local_slack"
         if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
@@ -6799,6 +6802,9 @@ const main = async () => {
             }})
           },
         })
+        if(!flags.check&&output.steps.some(step=>step.id==="service"&&step.status==="running")) {
+          output.webVerification=await reportWorkerInstallation({directory,headers:getCliAuthHeaders(),appUrl:getAppUrl(flags),version:getCliVersion(),endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed")})
+        }
         if(flags.ndjson)printNdjson({type:"worker.setup.completed",...output})
         else if(!human)printJson(output)
         else console.log(setupSummary(output,{mode:setupMode}))

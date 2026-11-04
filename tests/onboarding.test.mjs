@@ -256,3 +256,7 @@ test('genuine denied credentials stop waiting without retry or granting access',
   assert.equal(result.steps[0].id,'community_auth');assert.equal(f.counts().installed,0)
  }finally{f.close()}
 })
+test('missing GitHub CLI is an installation prerequisite, not a misleading authentication failure',async()=>{
+ const f=fixture()
+ try{const result=await setupWorker({...f.options,run:()=>({status:null,error:{code:'ENOENT'}})});const github=result.steps.find(s=>s.id==='github');assert.equal(github.status,'installation_required');assert.equal(github.nextUrl,'https://cli.github.com/');assert.equal(result.state,'running_with_action_requirements')}finally{f.close()}
+})

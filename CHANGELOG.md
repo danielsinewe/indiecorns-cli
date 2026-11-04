@@ -1,3 +1,10 @@
+## 0.4.15 - 2026-11-04
+
+- Confirm worker setup on the signed-in member's join page with bounded process/lock/heartbeat evidence; attach scheduled checks to existing feed reads without changing credential bindings.
+- Report the actual running service version, preserve older healthy services, and keep read-only setup checks free of verification updates.
+- Identify a missing GitHub CLI as an installation prerequisite and provide the install link before the authorization command.
+- Collect no contacts, hostnames, file paths, provider tokens or queue content in installation evidence.
+
 ## 0.4.14 - 2026-11-04
 
 - Make normal worker setup and health readable: named progress checks, clear outcomes, actionable recovery steps and npx commands that work without a global install.

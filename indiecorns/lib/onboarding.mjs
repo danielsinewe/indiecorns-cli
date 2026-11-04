@@ -109,8 +109,10 @@ async function setup({directory,appUrl,headers,accountRevision,mode='draft',chec
   const previousIdentity=read(identityPath,null)
   const receiptActorIds=[...new Set(Object.values(read(join(directory,'state.json'),{}).actions??{}).map(a=>a.authorization?.githubActorId).filter(id=>Number.isSafeInteger(id)&&id>0))]
   const previousActorId=previousIdentity?.accountRevision===accountRevision?previousIdentity.id:receiptActorIds.length===1?receiptActorIds[0]:null
+  let githubCliMissing=false
   const ghToken=()=>{
     const gh=run('gh',['auth','token','--hostname','github.com'])
+    if(gh.error?.code==='ENOENT')githubCliMissing=true
     return gh.status===0&&typeof gh.stdout==='string'&&gh.stdout.trim()&&!/\s/.test(gh.stdout.trim())&&gh.stdout.trim().length<=16384?gh.stdout.trim():null
   }
   if(!token) {
@@ -144,7 +146,8 @@ async function setup({directory,appUrl,headers,accountRevision,mode='draft',chec
     } catch(error) {step('github',error.code==='GITHUB_ACTOR_CHANGED'?'account_mismatch':'authentication_required',{
       ...(error.code==='GITHUB_ACTOR_CHANGED'?{expectedActorId:previousActorId}:{}),
       nextCommand:'gh auth login --hostname github.com --scopes user:follow,public_repo'})}
-  } else step('github','authentication_required',{nextCommand:'gh auth login --hostname github.com --scopes user:follow,public_repo'})
+  } else step('github',githubCliMissing?'installation_required':'authentication_required',{
+    ...(githubCliMissing?{nextUrl:'https://cli.github.com/'}:{}),nextCommand:'gh auth login --hostname github.com --scopes user:follow,public_repo'})
   const process=inspect()
   if(process.registered&&process.appUrl!==appUrl) {step('service','app_mismatch');return result}
   if(!check) {
