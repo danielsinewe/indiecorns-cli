@@ -191,7 +191,7 @@ test('setup does not try other credentials to bypass provider throttling, or cal
   }finally{f.close()}
 })
 
-test('waiting CLI setup completes device handoff and automatically proceeds to setup in the same process',async()=>{
+for(const format of ['human','json','ndjson'])test(`waiting CLI setup completes device handoff and continues in the same process (${format})`,async()=>{
   const f=fixture();let origin,polls=0,feedCalls=0
   const server=createServer((req,res)=>{
     res.setHeader('content-type','application/json')
@@ -203,15 +203,23 @@ test('waiting CLI setup completes device handoff and automatically proceeds to s
   })
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`
   try {
-    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup','--mode','execute','--wait','--ndjson','--timeout','10','--app-url',origin,'--no-telemetry'],{
+    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup','--mode','execute','--wait',...(format==='ndjson'?['--ndjson']:format==='json'?['--json']:[]),'--timeout','10','--app-url',origin,'--no-telemetry'],{
       env:{...process.env,HOME:f.directory,USERPROFILE:f.directory,INDIECORNS_TOKEN:'',INDIECORNS_GITHUB_TOKEN:''},stdio:['ignore','pipe','pipe']})
     let stdout='',stderr='';child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b)
     const code=await new Promise(resolve=>child.on('close',resolve))
     // Stop before native OS registration: this test proves the real auth-to-setup
     // transition; the feed intentionally refuses access after token exchange.
-    assert.equal(code,1,stderr);const events=stdout.trim().split('\n').map(line=>JSON.parse(line))
-    assert.deepEqual(events.map(e=>e.type),['worker.setup.authorization_required','worker.setup.authenticated','worker.setup.completed'])
-    assert.equal(events.at(-1).steps[0].status,'auth_required');assert.equal(feedCalls,1);assert.ok(polls>=1)
+    assert.equal(code,1,stderr)
+    if(format==='ndjson'){
+      const events=stdout.trim().split('\n').map(line=>JSON.parse(line))
+      assert.deepEqual(events.map(e=>e.type),['worker.setup.authorization_required','worker.setup.authenticated','worker.setup.completed'])
+      assert.equal(events.at(-1).steps[0].status,'auth_required')
+    }else{
+      assert.equal(JSON.parse(stdout).steps[0].status,'auth_required')
+      assert.ok(stderr.includes(`${origin}/collective?cli=WAIT123`));assert.match(stderr,/setup will continue automatically/)
+      assert.match(stderr,/Signed in\. Continuing/)
+    }
+    assert.equal(feedCalls,1);assert.ok(polls>=1)
     assert.doesNotMatch(stdout,/wait-token/)
     const config=JSON.parse(readFileSync(join(f.directory,'.indiecorns','config.json')))
     assert.equal(config.browserSession.userId,'11111111-1111-4111-8111-111111111111');assert.equal(config.pendingCliSession,undefined)

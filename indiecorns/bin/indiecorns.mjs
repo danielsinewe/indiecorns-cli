@@ -6743,7 +6743,13 @@ const main = async () => {
         assertWorkerRuntime()
         const setupMode=flags.mode??(!getCliAuthHeaders()?readConfig().pendingCliSession?.workerSetupMode:undefined)??"draft"
         if(!["draft","collect","execute"].includes(setupMode))throw new Error("Setup mode must be collect, draft or execute")
-        if(flags.wait&&!flags.ndjson)throw new Error("Use --wait --ndjson to stream the authorization URL and continue setup automatically")
+        const setupProgress=event=>{
+          if(flags.ndjson)printNdjson(event)
+          else if(event.type==="worker.setup.authorization_required")console.error(`Open this link to sign in:\n${event.url}\nWaiting for authorization; setup will continue automatically.`)
+          else if(event.type==="worker.setup.authenticated")console.error("Signed in. Continuing worker setup…")
+          else if(event.type==="worker.setup.action_required")console.error(`Authorization ${event.status}. Continue with: ${event.resumeCommand}`)
+          else if(event.type==="worker.setup.retrying")console.error(`Community service temporarily unavailable. Retrying in ${Math.ceil(event.retryAfterMs/1000)} seconds…`)
+        }
         const timeoutSeconds=Number(flags.timeout??180)
         if(flags.wait&&(!Number.isInteger(timeoutSeconds)||timeoutSeconds<1||timeoutSeconds>900))throw new Error("Setup wait timeout must be between 1 and 900 seconds")
         const shellQuote=value=>`'${String(value).replace(/'/g,"'\\''")}'`
@@ -6766,18 +6772,18 @@ const main = async () => {
             else printJson(authorization)
             return 1
           }
-          printNdjson({type:"worker.setup.authorization_required",...authorization})
+          setupProgress({type:"worker.setup.authorization_required",...authorization})
           const pending=readConfig().pendingCliSession
           const completed=await waitForAppCliSession({appUrl:pending.appUrl,id:pending.id,secret:pending.secret,session:pending,timeoutSeconds})
           if(completed.status!=="completed") {
-            printNdjson({type:"worker.setup.action_required",status:completed.status,resumeCommand})
+            setupProgress({type:"worker.setup.action_required",status:completed.status,resumeCommand})
             return 1
           }
-          printNdjson({type:"worker.setup.authenticated"})
+          setupProgress({type:"worker.setup.authenticated"})
         }
         const output=await setupWorker({directory,appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),accountRevision:accountRevision(),
           mode:setupMode,check:Boolean(flags.check),install:installWorkerService,
-          retryForMs:flags.wait?timeoutSeconds*1000:0,onProgress:event=>{if(flags.ndjson)printNdjson(event)},
+          retryForMs:flags.wait?timeoutSeconds*1000:0,onProgress:setupProgress,
           persistAuth:()=>{
             // launchd/systemd/Task Scheduler do not inherit this terminal's token.
             // Bind the durable session to the same account revision as the env token.
