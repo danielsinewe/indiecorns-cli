@@ -1,3 +1,9 @@
+## 0.4.13 - 2026-11-04
+
+- Fix the copied onboarding command: `worker setup --wait` now waits for sign-in and continues setup without requiring `--ndjson`.
+- Show readable authorization and retry instructions on stderr while preserving a single JSON result on stdout. Explicit `--ndjson` retains its structured event stream.
+- Cover plain terminal, JSON and NDJSON waiting handoffs with actual spawned CLI tests. Existing worker processes, policy, receipts and health history are preserved.
+
 ## 0.4.12
 
 - Waiting worker setup automatically retries temporary community-service failures within its timeout and honors provider cooldowns. Service outages no longer tell members to sign in again.
