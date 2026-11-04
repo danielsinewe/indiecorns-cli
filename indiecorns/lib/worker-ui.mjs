@@ -32,8 +32,11 @@ export function setupSummary(result, {mode = 'draft'} = {}) {
     lines.push('You can close this terminal. Keep your computer awake, online and signed in.')
     if (result.capabilities?.githubActions) lines.push('GitHub follows and stars follow your saved limits. Product Hunt and other platforms are not enabled.')
     else lines.push('GitHub actions are not enabled in this mode.')
+    if(result.webVerification==='reported')lines.push('Your running-worker check is confirmed at https://app.indiecorns.com/join.')
+    else if(result.webVerification==='unavailable')lines.push('The worker is running, but the website could not confirm this check yet. Your local setup is preserved.')
   }
   const needs = (result.steps ?? []).filter(s => !['verified', 'preserved', 'created', 'running', 'planned'].includes(s.status))
+  if(needs.some(s=>s.id==='github'&&s.status==='installation_required'))lines.push('', 'Install GitHub CLI first: https://cli.github.com/')
   const retry = `indiecorns worker setup --mode ${mode} --wait`
   const next = needs.some(s => s.id === 'community_auth') ? retry : needs.find(s => s.nextCommand)?.nextCommand ?? result.nextCommand ?? (result.state === 'service_unavailable' ? retry : null)
   if (next) lines.push('', ready ? 'Check health whenever you like:' : 'Next step:', `  ${command(next)}`)

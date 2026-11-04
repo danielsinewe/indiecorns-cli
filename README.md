@@ -556,3 +556,20 @@ The current Mac pilot has verified live API roster refresh and automatic
 channel-link discovery. The Mac pilot has completed one independently verified GitHub star through an
 exact one-repository allowlist and a one-action daily cap. The persisted receipt
 survived restart without replay; broader platform executors remain pending.
+
+### Confirming a member worker
+
+Setup sends a small verification after matching the registered OS process, worker
+lock and a recent recorded heartbeat. The signed-in member can see that check at
+https://app.indiecorns.com/join. New workers attach ongoing checks to their existing
+community-feed reads. The website expires old evidence rather than counting a
+login or copied command as an installation. It labels local setup checks and
+scheduled background checks separately. This is authenticated local diagnostic
+evidence, not remote OS access or hardware attestation. Paths, contacts, provider
+credentials and queue content are never included. `setup --check` stays read-only
+and does not refresh this website verification. Existing healthy services are
+not upgraded or restarted merely to add ongoing check-ins.
+
+GitHub CLI is required to reuse or authorize a member's own action credential;
+missing installation now points to https://cli.github.com/ before the login command.
+The public-profile OAuth step alone does not grant follow or star permissions.
