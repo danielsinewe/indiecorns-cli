@@ -1,3 +1,10 @@
+## 0.4.14 - 2026-11-04
+
+- Make normal worker setup and health readable: named progress checks, clear outcomes, actionable recovery steps and npx commands that work without a global install.
+- Explain background operation and preserved action limits; distinguish healthy current samples from healthy recorded coverage.
+- Keep explicit --json, --agent and --ndjson machine-readable. Scripts consuming the former default JSON should add --json.
+- Preserve setup authorization, provider consent, policies, live services, queues, receipts and health history.
+
 ## 0.4.13 - 2026-11-04
 
 - Fix the copied onboarding command: `worker setup --wait` now waits for sign-in and continues setup without requiring `--ndjson`.

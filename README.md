@@ -214,7 +214,7 @@ MIT.
 Every community member can use the same command on their own computer:
 
 ```bash
-npx --yes indiecorns@latest worker setup --mode execute --wait --ndjson
+npx --yes indiecorns@latest worker setup --mode execute --wait
 ```
 
 Setup verifies the Indiecorns session and fresh community Slack feed, reuses an
@@ -230,10 +230,12 @@ If community login is missing, setup streams a device sign-in URL without openin
 a browser. After the member authorizes it, the waiting command automatically
 continues through account verification and service setup. No second terminal
 command is required. The default wait is 180 seconds (`--timeout` accepts 1–900).
-Omit `--wait --ndjson` for a single JSON response and a resumable command. Pending
+Normal setup shows readable progress, the result and the next step. Use `--json`
+for one structured result or `--wait --ndjson` for lifecycle events. Omit
+`--wait` to return a resumable sign-in link instead of waiting. Pending
 handoffs preserve their requested mode and are reused after timeout or restart.
 If GitHub login is missing or under-scoped, the
-discovery service can still run and the JSON result includes the precise GitHub
+discovery service can still run and setup shows the precise GitHub
 authorization command. A stored token that expires can be replaced from an
 already-refreshed GitHub CLI login only after verifying the same previously
 proven numeric actor. Checks never save a replacement, account switches are
@@ -255,8 +257,9 @@ indiecorns worker health --hours 24
 ```
 
 `--check` performs read-only provider and OS checks and never stores credentials,
-creates policy, starts login, installs or restarts a service. Setup outputs JSON
-and exits nonzero when setup or authorization remains incomplete. A live process
+creates policy, starts login, installs or restarts a service. Setup and health
+use readable text by default; add `--json` or `--agent` for structured output.
+Setup exits nonzero when setup or authorization remains incomplete. A live process
 with failing sources returns `running_with_source_requirements`. `ready` means
 the configured worker and supported GitHub setup are ready; Product Hunt and other
 platforms are reported separately and are not implicitly enabled. Slack roster

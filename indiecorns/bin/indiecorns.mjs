@@ -28,6 +28,7 @@ import { assertWorkerRuntime } from "../lib/worker-lock.mjs"
 import { readHealthReport } from "../lib/health.mjs"
 import { syncGithubMemberPosts } from "../lib/github-member-posts.mjs"
 import { setupWorker } from "../lib/onboarding.mjs"
+import { setupStepText, setupSummary, healthText } from "../lib/worker-ui.mjs"
 import {storageSettings,directoryBytes} from "../lib/storage.mjs"
 import {credentialRevision} from "../lib/auth-context.mjs"
 
@@ -130,7 +131,8 @@ Commands:
   worker run [--once]            Poll community targets durably in the background
   worker setup [--mode execute]  Configure Slack priority, GitHub and background startup
   worker setup --check           Read-only onboarding and service diagnosis
-  worker setup --wait --ndjson   Continue through device sign-in without rerunning setup
+  worker setup --wait            Sign in and continue setup automatically
+  worker setup --json            Machine-readable result (--ndjson for events)
   worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
@@ -6741,6 +6743,7 @@ const main = async () => {
       }
       if(args[0]==="setup") {
         assertWorkerRuntime()
+        const human=!flags.json&&!flags.agent&&!flags.ndjson
         const setupMode=flags.mode??(!getCliAuthHeaders()?readConfig().pendingCliSession?.workerSetupMode:undefined)??"draft"
         if(!["draft","collect","execute"].includes(setupMode))throw new Error("Setup mode must be collect, draft or execute")
         const setupProgress=event=>{
@@ -6752,6 +6755,7 @@ const main = async () => {
         }
         const timeoutSeconds=Number(flags.timeout??180)
         if(flags.wait&&(!Number.isInteger(timeoutSeconds)||timeoutSeconds<1||timeoutSeconds>900))throw new Error("Setup wait timeout must be between 1 and 900 seconds")
+        if(human)console.log(`INDIECORNS · ${flags.check?"Setup check":"Community setup"}\n\n${flags.check?"Checking your account and background worker…":"Connecting your account and checking this computer…"}`)
         const shellQuote=value=>`'${String(value).replace(/'/g,"'\\''")}'`
         const resumeCommand=`indiecorns worker setup --mode ${setupMode}${getAppUrl(flags)!==DEFAULT_APP_URL?` --app-url ${shellQuote(getAppUrl(flags))}`:""}`
         let authorization
@@ -6769,7 +6773,8 @@ const main = async () => {
           writeConfig({...readConfig(),pendingCliSession:{...readConfig().pendingCliSession,workerSetupMode:setupMode}})
           if(!flags.wait) {
             if(flags.ndjson)printNdjson({type:"worker.setup.authorization_required",...authorization})
-            else printJson(authorization)
+            else if(!human)printJson(authorization)
+            else console.log(`\nSign in to Indiecorns:\n  ${authorization.url}\n\nThen continue setup:\n  ${authorization.resumeCommand.replace(/^indiecorns\b/,"npx --yes indiecorns@latest")} --wait`)
             return 1
           }
           setupProgress({type:"worker.setup.authorization_required",...authorization})
@@ -6784,6 +6789,7 @@ const main = async () => {
         const output=await setupWorker({directory,appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),accountRevision:accountRevision(),
           mode:setupMode,check:Boolean(flags.check),install:installWorkerService,
           retryForMs:flags.wait?timeoutSeconds*1000:0,onProgress:setupProgress,
+          onStep:human?step=>console.log(setupStepText(step)):undefined,
           persistAuth:()=>{
             // launchd/systemd/Task Scheduler do not inherit this terminal's token.
             // Bind the durable session to the same account revision as the env token.
@@ -6794,7 +6800,8 @@ const main = async () => {
           },
         })
         if(flags.ndjson)printNdjson({type:"worker.setup.completed",...output})
-        else printJson(output)
+        else if(!human)printJson(output)
+        else console.log(setupSummary(output,{mode:setupMode}))
         return output.state==="ready"?0:1
       }
       if (args[0] === "credentials") {
@@ -6855,7 +6862,10 @@ const main = async () => {
         return 0
       }
       if (args[0] === "health") {
-        printJson(readHealthReport(directory,{hours:Number(flags.hours??24)}))
+        const report=readHealthReport(directory,{hours:Number(flags.hours??24)})
+        if(flags.ndjson)printNdjson(report)
+        else if(flags.json||flags.agent)printJson(report)
+        else console.log(healthText(report))
         return 0
       }
       if (args[0] !== "run") throw new Error("Use worker run [--once] or worker status")
