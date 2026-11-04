@@ -66,11 +66,11 @@ export async function setupWorker(options) {
 async function setup({directory,appUrl,headers,accountRevision,mode='draft',check=false,
   request=fetch,environment=process.env,run=command,inspect=()=>inspectWorkerProcess(directory),
   install,persistAuth=()=>{},runtimeVersion=process.versions.node,wait=sleep,
-  retryForMs=0,onProgress=()=>{},now=Date.now}) {
+  retryForMs=0,onProgress=()=>{},onStep=()=>{},now=Date.now}) {
   assertWorkerRuntime(runtimeVersion)
   if(!['draft','collect','execute'].includes(mode))throw new Error('Setup mode must be collect, draft or execute')
   const result={version:1,command:'worker setup',check,state:'action_required',steps:[],limitations:['computer_must_be_awake_online_and_logged_in']}
-  const step=(id,status,extra={})=>result.steps.push({id,status,...extra})
+  const step=(id,status,extra={})=>{const item={id,status,...extra};result.steps.push(item);onStep(item)}
   if(!headers) {step('community_auth','required',{nextCommand:'indiecorns login --json --no-open'});return result}
   // Preflight in memory: never modify a running worker's queue or feed cursor.
   const probe={jobs:{}}

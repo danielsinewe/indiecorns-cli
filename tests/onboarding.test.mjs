@@ -119,7 +119,7 @@ test('actual CLI setup check uses shared community auth without creating a servi
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
   try {
     const origin=`http://127.0.0.1:${server.address().port}`
-    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup','--check','--app-url',origin,'--no-telemetry'],{
+    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup','--check','--json','--app-url',origin,'--no-telemetry'],{
       env:{...process.env,HOME:f.directory,USERPROFILE:f.directory,INDIECORNS_TOKEN:'community-secret',INDIECORNS_GITHUB_TOKEN:'',PATH:f.directory},stdio:['ignore','pipe','pipe']})
     let stdout='',stderr='';child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b)
     const code=await new Promise(resolve=>child.on('close',resolve))
@@ -142,7 +142,7 @@ test('actual setup reuses its pending device authorization and returns the origi
   })
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`
   const run=(includeMode=true)=>new Promise((resolve,reject)=>{
-    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup',...(includeMode?['--mode','execute']:[]),'--app-url',origin,'--no-open','--no-telemetry'],{
+    const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup',...(includeMode?['--mode','execute']:[]),'--app-url',origin,'--json','--no-open','--no-telemetry'],{
       env:{...process.env,HOME:f.directory,USERPROFILE:f.directory,INDIECORNS_TOKEN:'',INDIECORNS_GITHUB_TOKEN:''},stdio:['ignore','pipe','pipe']})
     let stdout='',stderr='';child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);child.on('error',reject)
     child.on('close',code=>resolve({code,stdout,stderr}))
@@ -215,7 +215,8 @@ for(const format of ['human','json','ndjson'])test(`waiting CLI setup completes 
       assert.deepEqual(events.map(e=>e.type),['worker.setup.authorization_required','worker.setup.authenticated','worker.setup.completed'])
       assert.equal(events.at(-1).steps[0].status,'auth_required')
     }else{
-      assert.equal(JSON.parse(stdout).steps[0].status,'auth_required')
+      if(format==='json')assert.equal(JSON.parse(stdout).steps[0].status,'auth_required')
+      else {assert.match(stdout,/INDIECORNS/);assert.match(stdout,/Indiecorns account: auth required/);assert.match(stdout,/Next step:/);assert.doesNotMatch(stdout,/"steps"|"version"/)}
       assert.ok(stderr.includes(`${origin}/collective?cli=WAIT123`));assert.match(stderr,/setup will continue automatically/)
       assert.match(stderr,/Signed in\. Continuing/)
     }
