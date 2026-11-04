@@ -6801,7 +6801,7 @@ const main = async () => {
         })
         if(flags.ndjson)printNdjson({type:"worker.setup.completed",...output})
         else if(!human)printJson(output)
-        else console.log(setupSummary(output))
+        else console.log(setupSummary(output,{mode:setupMode}))
         return output.state==="ready"?0:1
       }
       if (args[0] === "credentials") {

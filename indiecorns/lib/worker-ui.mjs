@@ -19,7 +19,7 @@ export function setupStepText(step) {
   return `  ${ok ? '✓' : '!'} ${label}: ${detail}`
 }
 
-export function setupSummary(result) {
+export function setupSummary(result, {mode = 'draft'} = {}) {
   const ready = result.state === 'ready'
   const lines = ['', ready ? (result.check ? 'Your setup is ready.' : 'You’re all set. Indiecorns is running in the background.') : {
     service_unavailable: 'Setup paused: the community service is temporarily unavailable.',
@@ -34,7 +34,8 @@ export function setupSummary(result) {
     else lines.push('GitHub actions are not enabled in this mode.')
   }
   const needs = (result.steps ?? []).filter(s => !['verified', 'preserved', 'created', 'running', 'planned'].includes(s.status))
-  const next = needs.some(s => s.id === 'community_auth') ? 'indiecorns worker setup --wait' : needs.find(s => s.nextCommand)?.nextCommand ?? result.nextCommand
+  const retry = `indiecorns worker setup --mode ${mode} --wait`
+  const next = needs.some(s => s.id === 'community_auth') ? retry : needs.find(s => s.nextCommand)?.nextCommand ?? result.nextCommand ?? (result.state === 'service_unavailable' ? retry : null)
   if (next) lines.push('', ready ? 'Check health whenever you like:' : 'Next step:', `  ${command(next)}`)
   if (result.state === 'service_unavailable') lines.push('Your saved setup is preserved. Retry setup after the service recovers; you do not need to sign in again.')
   if (ready) lines.push('', 'To stop and remove the background service:', `  ${cli} worker uninstall`)

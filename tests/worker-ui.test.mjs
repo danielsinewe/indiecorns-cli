@@ -15,6 +15,7 @@ test('incomplete authorization shows the actual prerequisite instead of a mislea
   const text=setupSummary({state:'running_with_action_requirements',steps:[{id:'github',status:'permissions_required',nextCommand:'gh auth refresh --hostname github.com --scopes user:follow,public_repo'}],nextCommand:'indiecorns worker setup --check'})
   assert.match(text,/GitHub actions still need/);assert.match(text,/gh auth refresh/);assert.doesNotMatch(text,/all set|close this terminal/)
   assert.match(setupSummary({state:'service_unavailable',steps:[]}),/do not need to sign in again/)
+  assert.match(setupSummary({state:'service_unavailable',steps:[]},{mode:'execute'}),/worker setup --mode execute --wait/)
   assert.match(setupSummary({state:'account_policy_mismatch',steps:[]}),/different account/)
 })
 
