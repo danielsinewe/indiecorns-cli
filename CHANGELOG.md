@@ -1,3 +1,7 @@
+# 0.4.17
+
+- Recover from temporary DNS lookup failures with one-minute scheduled read retries across discovery, community feed and member posts. Explicit provider cooldowns, historical failure samples, receipts and limits stay intact. Member-post failures now retain sanitized diagnostics.
+
 # 0.4.16
 
 - Account-bound website setup detects stale Terminal authorization and guides sign-in recovery in the same waiting command. Wrong-account authorization cannot replace the saved session; checks remain read-only and policy bindings/history are preserved.

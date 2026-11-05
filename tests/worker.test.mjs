@@ -245,3 +245,15 @@ test('missing cold payload fails closed and leaves the committed index and actio
     assert.equal(after.state.actions.receipt.status,'completed')
   } finally {rmSync(directory,{recursive:true})}
 })
+test('DNS disconnection retries after a minute across process exits and preserves history, action cap and cooldown',async()=>{
+ const directory=fixture();let clock=1000,offline=true,calls=0
+ const options={directory,once:true,intervalMs:300000,now:()=>clock,discover:async()=>{calls++;if(offline)throw new TypeError('PRIVATE_NETWORK',{cause:{code:'ENOTFOUND'}});return {targets:[],sources:[],partial:false}}}
+ try{
+  const failed=await runWorker(options);assert.equal(failed.nextPollAt,61000)
+  failed.actions={receipt:{kind:'github_star',status:'completed',completedAt:1}};failed.actionBudget={day:'2026-11-05',attempts:1};failed.externalNextAttemptAt=7200000
+  writeFileSync(join(directory,'state.json'),JSON.stringify(failed));clock=60000;await runWorker(options);assert.equal(calls,1)
+  clock=61000;offline=false;const recovered=await runWorker(options)
+  assert.equal(recovered.lastError,null);assert.equal(recovered.actions.receipt.completedAt,1);assert.equal(recovered.actionBudget.attempts,1);assert.equal(recovered.externalNextAttemptAt,7200000)
+  assert.equal(recovered.discoveryFailures[0].code,'ENOTFOUND');assert.doesNotMatch(JSON.stringify(recovered),/PRIVATE_NETWORK/)
+ }finally{rmSync(directory,{recursive:true})}
+})

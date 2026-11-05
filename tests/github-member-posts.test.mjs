@@ -157,3 +157,12 @@ test('primary provider reset timestamps use the same clock as durable poll reser
     request:async()=>new Response(null,{status:403,headers:{'x-ratelimit-remaining':'0','x-ratelimit-reset':String((NOW+3600000)/1000)}})})
   assert.equal(state.externalNextAttemptAt,NOW+3600000)
 })
+test('member-post DNS recovery retries after a minute, preserves provider cooldown and clears only current diagnostics',async()=>{
+ let clock=NOW,calls=0;const state={jobs:{}};const good=fixture({items:[],total:0})
+ await syncGithubMemberPosts({state,snapshot:snapshot(),token:'PRIVATE_TOKEN',now:()=>clock,pause:async()=>{},request:async()=>{calls++;throw new TypeError('PRIVATE_HOST',{cause:{code:'ENOTFOUND'}})}})
+ const author=Object.values(state.githubMemberPosts.authors)[0];assert.equal(author.nextPollAt,NOW+60000);assert.equal(author.error.code,'ENOTFOUND')
+ clock=NOW+59999;await syncGithubMemberPosts({state,snapshot:snapshot(),token:'PRIVATE_TOKEN',now:()=>clock,pause:async()=>{},request:()=>assert.fail('not due')})
+ clock=NOW+60000;await syncGithubMemberPosts({state,snapshot:snapshot(),token:'PRIVATE_TOKEN',now:()=>clock,pause:async()=>{},request:good.request});assert.equal(author.health,'ok');assert.equal(author.error,undefined)
+ state.externalNextAttemptAt=clock+7200000;author.nextPollAt=clock;await syncGithubMemberPosts({state,snapshot:snapshot(),token:'PRIVATE_TOKEN',now:()=>clock,pause:async()=>{},request:()=>assert.fail('provider cooldown wins')});assert.equal(state.githubMemberPosts.nextPollAt,clock+7200000)
+ assert.doesNotMatch(JSON.stringify(state),/PRIVATE_TOKEN|PRIVATE_HOST/)
+})
