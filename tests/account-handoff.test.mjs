@@ -4,7 +4,7 @@ import {checkAccountHandoff,completedAccountMatches} from '../indiecorns/lib/acc
 const options={appUrl:'https://app.indiecorns.com',headers:{'x-indiecorns-cli-session':'session','x-indiecorns-cli-secret':'private'},expectedAccountId:'user_webAccount'}
 test('compares authenticated server identity, never a cached name or provider login',async()=>{
  for(const [userId,state] of [['user_webAccount','matched'],['user_terminalAccount','account_mismatch']]) {
-  const result=await checkAccountHandoff({...options,request:async(url,init)=>{assert.equal(url,options.appUrl+'/api/community/worker-account');assert.equal(init.method,'GET');assert.equal(init.redirect,'error');return Response.json({userId,email:'must not propagate'})}})
+  const result=await checkAccountHandoff({...options,request:async(url,init)=>{assert.equal(url,options.appUrl+'/api/community/onboarding/?view=cli-account');assert.equal(init.method,'GET');assert.equal(init.redirect,'error');return Response.json({userId,email:'must not propagate'})}})
   assert.deepEqual(result,{state});assert.doesNotMatch(JSON.stringify(result),/private|email|user_/)
  }
 })

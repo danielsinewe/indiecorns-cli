@@ -9,7 +9,7 @@ export async function checkAccountHandoff({appUrl,headers,expectedAccountId,requ
   if(!validAccountId(expectedAccountId))throw new Error('--account requires the account-bound command from https://app.indiecorns.com/join')
   if(!headers)return {state:'authorization_required'}
   try {
-    const response=await request(`${appUrl}/api/community/worker-account`,{method:'GET',headers,redirect:'error',signal:AbortSignal.timeout(10000)})
+    const response=await request(`${appUrl}/api/community/onboarding/?view=cli-account`,{method:'GET',headers,redirect:'error',signal:AbortSignal.timeout(10000)})
     if(response.status===401||response.status===403){await response.body?.cancel();return {state:'authorization_required'}}
     if(!response.ok){await response.body?.cancel();return {state:'service_unavailable',httpStatus:response.status}}
     let text='',bytes=0

@@ -264,7 +264,7 @@ for(const kind of ['check','wrong_browser','correct_browser'])test(`account-boun
  const f=fixture();let origin,created=0,feedCalls=0
  const server=createServer((req,res)=>{
   res.setHeader('content-type','application/json')
-  if(req.url==='/api/community/worker-account')res.end(JSON.stringify({userId:'user_oldAccount'}))
+  if(req.url==='/api/community/onboarding/?view=cli-account')res.end(JSON.stringify({userId:'user_oldAccount'}))
   else if(req.method==='POST'&&req.url==='/api/public/cli/session') {created++;res.end(JSON.stringify({code:'ACCOUNT123',verification_url:`${origin}/authorize`,poll_url:`${origin}/poll`,exchange_url:`${origin}/exchange`}))}
   else if(req.url==='/poll')res.end(JSON.stringify({status:'completed'}))
   else if(req.url==='/exchange')res.end(JSON.stringify({token:'NEW_PRIVATE_TOKEN',user_id:kind==='wrong_browser'?'user_wrongAccount':'user_expectedAccount',token_expires_at:'2099-01-01T00:00:00Z'}))
