@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {checkAccountHandoff,completedAccountMatches} from '../lib/account-handoff.mjs'
 
 import {
   cpSync,
@@ -2996,13 +2997,14 @@ const markCliInstalled = async (appUrl, { serverAlreadyRecorded = false } = {}) 
   return { savedAction, pluginInstall }
 }
 
-const waitForAppCliSession = async ({ appUrl, id, secret, session: pending, timeoutSeconds }) => {
+const waitForAppCliSession = async ({ appUrl, id, secret, session: pending, timeoutSeconds, expectedAccountId }) => {
   const deadline = Date.now() + timeoutSeconds * 1000
 
   while (Date.now() < deadline) {
     const session = await pollCliSession({ appUrl, id, secret, ...pending })
 
     if (session.status === "completed") {
+      if(!completedAccountMatches(session,expectedAccountId))return {status:"account_mismatch"}
       saveCompletedSession({ appUrl, session, id, secret })
       const installResult = await markCliInstalled(appUrl, {
         serverAlreadyRecorded: Boolean(session.token),
@@ -6753,25 +6755,37 @@ const main = async () => {
           if(flags.ndjson)printNdjson(event)
           else if(event.type==="worker.setup.authorization_required")console.error(`Open this link to sign in:\n${event.url}\nWaiting for authorization; setup will continue automatically.`)
           else if(event.type==="worker.setup.authenticated")console.error("Signed in. Continuing worker setup…")
-          else if(event.type==="worker.setup.action_required")console.error(`Authorization ${event.status}. Continue with: ${event.resumeCommand}`)
+          else if(event.type==="worker.setup.action_required")console.error(event.status==="account_mismatch"?`The browser authorized a different account. Switch to the account used on /join, then run: ${event.resumeCommand} --wait. Your previous authorization and worker data are preserved.`:`Authorization ${event.status}. Continue with: ${event.resumeCommand}`)
           else if(event.type==="worker.setup.retrying")console.error(`Community service temporarily unavailable. Retrying in ${Math.ceil(event.retryAfterMs/1000)} seconds…`)
         }
         const timeoutSeconds=Number(flags.timeout??180)
         if(flags.wait&&(!Number.isInteger(timeoutSeconds)||timeoutSeconds<1||timeoutSeconds>900))throw new Error("Setup wait timeout must be between 1 and 900 seconds")
         if(human)console.log(`INDIECORNS · ${flags.check?"Setup check":"Community setup"}\n\n${flags.check?"Checking your account and background worker…":"Connecting your account and checking this computer…"}`)
         const shellQuote=value=>`'${String(value).replace(/'/g,"'\\''")}'`
-        const resumeCommand=`indiecorns worker setup --mode ${setupMode}${getAppUrl(flags)!==DEFAULT_APP_URL?` --app-url ${shellQuote(getAppUrl(flags))}`:""}`
+        const resumeCommand=`indiecorns worker setup --mode ${setupMode}${flags.account?` --account ${shellQuote(flags.account)}`:""}${getAppUrl(flags)!==DEFAULT_APP_URL?` --app-url ${shellQuote(getAppUrl(flags))}`:""}`
+        const expectedAccountId=flags.account
+        const accountCheck=await checkAccountHandoff({appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),expectedAccountId})
+        if(accountCheck.state==='service_unavailable'||(flags.check&&['account_mismatch','authorization_required'].includes(accountCheck.state))) {
+          const output={version:1,command:'worker setup',check:Boolean(flags.check),state:accountCheck.state,steps:[{id:'community_auth',status:accountCheck.state}],nextCommand:resumeCommand+' --wait'}
+          if(flags.ndjson)printNdjson({type:'worker.setup.completed',...output})
+          else if(!human)printJson(output)
+          else console.log(setupSummary(output,{mode:setupMode}))
+          return 1
+        }
+        const recoverAccount=['account_mismatch','authorization_required'].includes(accountCheck.state)
+        if(recoverAccount&&process.env.INDIECORNS_TOKEN)throw new Error('The environment token does not match this account. Run the account-bound setup without INDIECORNS_TOKEN; saved worker data is unchanged.')
+        if(recoverAccount&&human)console.log('\nYour Terminal authorization does not match this website account. Sign in with the same account used on /join; setup will continue here. Your saved worker data and action limits are preserved.')
         let authorization
         // Resume the existing device handoff without opening or selecting a browser.
-        if(!getCliAuthHeaders()&&!flags.check&&readConfig().pendingCliSession) {
+        if(!recoverAccount&&!getCliAuthHeaders()&&!flags.check&&readConfig().pendingCliSession) {
           const pending=readConfig().pendingCliSession
           const session=await pollCliSession(pending)
-          if(session.status==="completed")saveCompletedSession({appUrl:pending.appUrl,session,id:pending.id,secret:pending.secret})
+          if(session.status==="completed"&&completedAccountMatches(session,expectedAccountId))saveCompletedSession({appUrl:pending.appUrl,session,id:pending.id,secret:pending.secret})
           else if(!["expired","not_found"].includes(session.status)&&pending.verificationUrl) {
             authorization={status:"browser_auth_required",url:pending.verificationUrl,resumeCommand}
           }
         }
-        if(!getCliAuthHeaders()&&!flags.check) {
+        if((recoverAccount||!getCliAuthHeaders())&&!flags.check) {
           authorization??=await runBrowserAuth({...flags,json:true,"no-open":true,resumeCommand,returnAuthResult:true})
           writeConfig({...readConfig(),pendingCliSession:{...readConfig().pendingCliSession,workerSetupMode:setupMode}})
           if(!flags.wait) {
@@ -6782,9 +6796,10 @@ const main = async () => {
           }
           setupProgress({type:"worker.setup.authorization_required",...authorization})
           const pending=readConfig().pendingCliSession
-          const completed=await waitForAppCliSession({appUrl:pending.appUrl,id:pending.id,secret:pending.secret,session:pending,timeoutSeconds})
+          const completed=await waitForAppCliSession({appUrl:pending.appUrl,id:pending.id,secret:pending.secret,session:pending,timeoutSeconds,expectedAccountId})
           if(completed.status!=="completed") {
             setupProgress({type:"worker.setup.action_required",status:completed.status,resumeCommand})
+            if(!human&&!flags.ndjson)printJson({version:1,command:'worker setup',state:completed.status,nextCommand:resumeCommand+' --wait',steps:[{id:'community_auth',status:completed.status}]})
             return 1
           }
           setupProgress({type:"worker.setup.authenticated"})
@@ -6802,6 +6817,7 @@ const main = async () => {
             }})
           },
         })
+        if(expectedAccountId&&['service_unavailable','action_required'].includes(output.state))output.nextCommand=resumeCommand+' --wait'
         if(!flags.check&&output.steps.some(step=>step.id==="service"&&step.status==="running")) {
           output.webVerification=await reportWorkerInstallation({directory,headers:getCliAuthHeaders(),appUrl:getAppUrl(flags),version:getCliVersion(),endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed")})
         }

@@ -1,3 +1,7 @@
+# 0.4.16
+
+- Account-bound website setup detects stale Terminal authorization and guides sign-in recovery in the same waiting command. Wrong-account authorization cannot replace the saved session; checks remain read-only and policy bindings/history are preserved.
+
 ## 0.4.15 - 2026-11-04
 
 - Confirm worker setup on the signed-in member's join page with bounded process/lock/heartbeat evidence; attach scheduled checks to existing feed reads without changing credential bindings.
