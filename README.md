@@ -226,6 +226,8 @@ New execute policies enable only fresh verified Slack-member GitHub follows and
 stars, capped at **one external attempt per UTC day**. Omit `--mode execute` to
 collect observations and local briefs without external actions.
 
+Copy setup from https://app.indiecorns.com/join to bind it to your signed-in account. The `--account` handoff checks your Terminal authorization automatically. If it belongs to a different account, setup presents a sign-in link and continues after you authorize the same website account. A wrong browser account is rejected before replacing saved authorization. `--check` only reports mismatches; existing execute policies stay bound to their original account, with limits and history preserved. No config diagnostic commands are needed.
+
 If community login is missing, setup streams a device sign-in URL without opening
 a browser. After the member authorizes it, the waiting command automatically
 continues through account verification and service setup. No second terminal

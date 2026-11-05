@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtempSync,rmSync,readFileSync,existsSync,writeFileSync,statSync} from 'node:fs'
+import {mkdtempSync,rmSync,readFileSync,existsSync,writeFileSync,statSync,mkdirSync} from 'node:fs'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {setupWorker,inspectWorkerProcess} from '../indiecorns/lib/onboarding.mjs'
@@ -259,4 +259,33 @@ test('genuine denied credentials stop waiting without retry or granting access',
 test('missing GitHub CLI is an installation prerequisite, not a misleading authentication failure',async()=>{
  const f=fixture()
  try{const result=await setupWorker({...f.options,run:()=>({status:null,error:{code:'ENOENT'}})});const github=result.steps.find(s=>s.id==='github');assert.equal(github.status,'installation_required');assert.equal(github.nextUrl,'https://cli.github.com/');assert.equal(result.state,'running_with_action_requirements')}finally{f.close()}
+})
+for(const kind of ['check','wrong_browser','correct_browser'])test(`account-bound actual setup detects stale Terminal auth (${kind})`,async()=>{
+ const f=fixture();let origin,created=0,feedCalls=0
+ const server=createServer((req,res)=>{
+  res.setHeader('content-type','application/json')
+  if(req.url==='/api/community/worker-account')res.end(JSON.stringify({userId:'user_oldAccount'}))
+  else if(req.method==='POST'&&req.url==='/api/public/cli/session') {created++;res.end(JSON.stringify({code:'ACCOUNT123',verification_url:`${origin}/authorize`,poll_url:`${origin}/poll`,exchange_url:`${origin}/exchange`}))}
+  else if(req.url==='/poll')res.end(JSON.stringify({status:'completed'}))
+  else if(req.url==='/exchange')res.end(JSON.stringify({token:'NEW_PRIVATE_TOKEN',user_id:kind==='wrong_browser'?'user_wrongAccount':'user_expectedAccount',token_expires_at:'2099-01-01T00:00:00Z'}))
+  else if(req.url.startsWith('/api/public/cli/worker-feed')){feedCalls++;res.statusCode=401;res.end('{}')}
+  else {res.statusCode=404;res.end('{}')}
+ })
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`
+ const configDir=join(f.directory,'.indiecorns'),workerDir=join(configDir,'worker');mkdirSync(workerDir,{recursive:true});saveState(join(workerDir,'state.json'),{actions:{receipt:{status:'completed'}},actionBudget:{day:'2026-11-05',attempts:1}})
+ saveState(join(workerDir,'policy.json'),{accountRevision:'old-policy',maxExternalPerDay:1})
+ const config={browserSession:{authMode:'device_code',appUrl:origin,accessToken:'OLD_PRIVATE_TOKEN',userId:'user_oldAccount',tokenExpiresAt:'2099-01-01T00:00:00Z'}}
+ saveState(join(configDir,'config.json'),config)
+ const before=['state.json','policy.json'].map(p=>readFileSync(join(workerDir,p),'utf8'))
+ try{
+  const child=spawn(process.execPath,['indiecorns/bin/indiecorns.mjs','worker','setup','--mode','execute','--account','user_expectedAccount','--wait','--timeout','5','--json','--app-url',origin,'--no-telemetry',...(kind==='check'?['--check']:[])],{env:{...process.env,HOME:f.directory,USERPROFILE:f.directory,INDIECORNS_TOKEN:'',INDIECORNS_GITHUB_TOKEN:''},stdio:['ignore','pipe','pipe']})
+  let stdout='',stderr='';child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);const code=await new Promise(r=>child.on('close',r))
+  assert.equal(code,1,stderr);assert.doesNotMatch(stdout+stderr,/OLD_PRIVATE_TOKEN|NEW_PRIVATE_TOKEN/)
+  const after=JSON.parse(readFileSync(join(configDir,'config.json')))
+  assert.equal(after.browserSession.userId,kind==='correct_browser'?'user_expectedAccount':'user_oldAccount')
+  assert.deepEqual(['state.json','policy.json'].map(p=>readFileSync(join(workerDir,p),'utf8')),before)
+  assert.equal(created,kind==='check'?0:1);assert.equal(feedCalls,kind==='correct_browser'?1:0)
+  if(kind==='check')assert.equal(JSON.parse(stdout).state,'account_mismatch')
+  if(kind==='wrong_browser')assert.match(stderr,/browser authorized a different account/)
+ }finally{server.close();f.close()}
 })

@@ -22,6 +22,8 @@ export function setupStepText(step) {
 export function setupSummary(result, {mode = 'draft'} = {}) {
   const ready = result.state === 'ready'
   const lines = ['', ready ? (result.check ? 'Your setup is ready.' : 'You’re all set. Indiecorns is running in the background.') : {
+    account_mismatch: 'Setup paused: Terminal and website accounts do not match. Sign in with the account used on /join.',
+    authorization_required: 'Setup needs your account authorization.',
     service_unavailable: 'Setup paused: the community service is temporarily unavailable.',
     account_policy_mismatch: 'Setup paused: this worker belongs to a different account.',
     running_with_action_requirements: 'Discovery is running. GitHub actions still need your authorization.',
@@ -37,9 +39,10 @@ export function setupSummary(result, {mode = 'draft'} = {}) {
   }
   const needs = (result.steps ?? []).filter(s => !['verified', 'preserved', 'created', 'running', 'planned'].includes(s.status))
   if(needs.some(s=>s.id==='github'&&s.status==='installation_required'))lines.push('', 'Install GitHub CLI first: https://cli.github.com/')
-  const retry = `indiecorns worker setup --mode ${mode} --wait`
+  const retry = result.nextCommand ?? `indiecorns worker setup --mode ${mode} --wait`
   const next = needs.some(s => s.id === 'community_auth') ? retry : needs.find(s => s.nextCommand)?.nextCommand ?? result.nextCommand ?? (result.state === 'service_unavailable' ? retry : null)
   if (next) lines.push('', ready ? 'Check health whenever you like:' : 'Next step:', `  ${command(next)}`)
+  if(result.state==='account_policy_mismatch')lines.push('Existing action limits and history are still bound to the previous account. Sign in to that account to use this worker, or contact support to preserve both accounts safely. No account binding was changed.')
   if (result.state === 'service_unavailable') lines.push('Your saved setup is preserved. Retry setup after the service recovers; you do not need to sign in again.')
   if (ready) lines.push('', 'To stop and remove the background service:', `  ${cli} worker uninstall`)
   return lines.join('\n')
