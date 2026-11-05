@@ -9,6 +9,7 @@ import { startHealthMonitor } from './health.mjs'
 import { githubIssue } from './github-issues.mjs'
 import {configureStorageBudget,reserveStorageWrite} from './storage.mjs'
 import {safeDiscoveryError} from './discovery-errors.mjs'
+import {sourceRetryDelay} from './network-recovery.mjs'
 
 const read = (path, fallback) => {
   try { return JSON.parse(readFileSync(path, 'utf8')) }
@@ -136,7 +137,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
         }
         state.lastPollAt = now()
         const requiresIntervention=state.lastError==='auth_required'||state.discoveryError?.kind==='storage'
-        const ceiling=requiresIntervention?3600000:300000
+        const ceiling=requiresIntervention?3600000:sourceRetryDelay(state.discoveryError)
         state.nextPollAt = now() + Math.max(state.retryAfterMs ?? 0, state.continuation && !state.lastError ? Math.min(intervalMs,5000) : Math.min(ceiling, intervalMs * 2 ** Math.min(state.failures, 10)))
       }
       if (prioritize) {

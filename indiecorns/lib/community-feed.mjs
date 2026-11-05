@@ -4,6 +4,7 @@ import {validateSlackEvidence} from './slack.mjs'
 import {enqueue} from './worker.mjs'
 import {credentialContext} from './auth-context.mjs'
 import {safeDiscoveryError} from './discovery-errors.mjs'
+import {sourceRetryDelay} from './network-recovery.mjs'
 
 // Community authentication authorizes this feed. Provider credentials remain on
 // the community server; clients retain only membership proof and link jobs.
@@ -63,7 +64,7 @@ export async function syncCommunityFeed({state,appUrl,endpoint='/api/community/w
   } catch(error) {
     feed.health=['auth_required','rate_limited','feed_unavailable','invalid_feed','cursor_reset'].includes(error.code)?error.code:'feed_unavailable'
     feed.error={...safeDiscoveryError(error),...(feed.httpStatus?{httpStatus:feed.httpStatus}:{}),at:now()}
-    feed.nextPollAt=now()+Math.max(60000,error.retryAfterMs??300000)
+    feed.nextPollAt=now()+Math.max(60000,sourceRetryDelay(error))
     checkpoint()
   }
   return feed.snapshot??null

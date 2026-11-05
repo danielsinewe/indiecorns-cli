@@ -1,5 +1,7 @@
 import {createHash} from 'node:crypto'
 import {setTimeout as sleep} from 'node:timers/promises'
+import {safeDiscoveryError} from './discovery-errors.mjs'
+import {sourceRetryDelay} from './network-recovery.mjs'
 import {githubJson} from './github-api.mjs'
 import {githubIssue,parseGithubIssue} from './github-issues.mjs'
 import {enqueue} from './worker.mjs'
@@ -90,11 +92,12 @@ export async function syncGithubMemberPosts({state,snapshot,token,signal,checkpo
         if(data.items.length===0&&data.total_count>0)throw new Error('GitHub search page unavailable')
         author.health='ok';author.page=1;author.since=null;author.pages=[];author.nextPollAt=now()+900000
       }
-      author.lastSuccessAt=now();checkpoint()
+      author.lastSuccessAt=now();delete author.error;checkpoint()
     }catch(error){
       if(signal?.aborted)break
+      author.error=safeDiscoveryError(error)
       author.health=error.code==='GITHUB_PERMISSION_REQUIRED'?'permission_required':error.retryAfterMs?'rate_limited':'source_unavailable'
-      author.nextPollAt=now()+Math.max(60000,error.retryAfterMs??300000)
+      author.nextPollAt=now()+Math.max(60000,sourceRetryDelay(error))
       if(error.retryAfterMs){state.externalNextAttemptAt=author.nextPollAt;checkpoint();break}
       checkpoint()
     }

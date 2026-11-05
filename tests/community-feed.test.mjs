@@ -113,3 +113,12 @@ test('known revoked community authentication stops action eligibility immediatel
   assert.equal(state.lastError,'auth_required')
   assert.equal(state.communityFeed.health,'auth_required')
 })
+test('feed DNS failures retry after one minute while saved feed, cursor and explicit provider cooldown remain intact',async()=>{
+ let clock=1000,calls=0;const state={jobs:{}}
+ const request=async()=>{calls++;throw new TypeError('PRIVATE_DNS',{cause:{code:'ENOTFOUND'}})}
+ await syncCommunityFeed({...options,state,now:()=>clock,request})
+ assert.equal(state.communityFeed.nextPollAt,61000);assert.equal(state.communityFeed.error.code,'ENOTFOUND')
+ clock=60000;await syncCommunityFeed({...options,state,now:()=>clock,request});assert.equal(calls,1)
+ clock=61000;await syncCommunityFeed({...options,state,now:()=>clock,request:async()=>new Response('',{status:503,headers:{'retry-after':'600'}})})
+ assert.equal(state.communityFeed.nextPollAt,661000);assert.doesNotMatch(JSON.stringify(state),/PRIVATE_DNS/)
+})
