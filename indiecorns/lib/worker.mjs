@@ -219,7 +219,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
       if (once) return state
       const dueObservations = observe && state.lastError !== 'auth_required'
         ? [...Object.values(state.jobs).filter(job => job.status === 'queued').map(job => job.nextObserveAt ?? now()),...backlogSchedule(state)] : []
-      const wakeAt = dueObservations.reduce((earliest,due)=>Math.min(earliest,due),Math.min(state.nextPollAt,state.priorityNextPollAt ?? Infinity))
+      const wakeAt = dueObservations.reduce((earliest,due)=>Math.min(earliest,due),Math.min(state.nextPollAt,state.priorityNextPollAt ?? Infinity,state.postDiscovery?.nextPollAt ?? Infinity))
       health.progress('sleep',wakeAt)
       await sleep(Math.max(100, wakeAt - now()), undefined, {signal})
         .catch(error => { if (error.name !== 'AbortError') throw error })

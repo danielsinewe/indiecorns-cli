@@ -199,3 +199,35 @@ Preserve these contracts during release work:
 If local `npm publish` fails with `E401` or `E404`, treat that as an auth or npm
 permission boundary for the local token, then use the public GitHub Actions
 workflow before reporting a blocker.
+
+## Local member-post discovery
+
+During authorized community-support work, use the local observation protocol:
+
+1. `indiecorns worker discovery claim --platform linkedin` (or `x`) returns one
+   short lease and an exact member profile/activity URL. A null task means no work.
+2. Read that URL in the host's permitted browser in the background. Reuse existing
+   tabs; close only temporary tabs. Never switch to a prohibited browser to gain
+   authentication. Never export cookies or upload whole pages.
+3. Write a small JSON observation with `leaseToken`, `observedAt` (epoch ms),
+   `status` (`observed`, `auth_required`, `blocked`, `unavailable`) and `posts`.
+   Each post needs `url`, `authorProfileUrl`, and optionally a short `title`.
+   Match the actual post card's author to the assigned profile. Reposts,
+   recommendations and “posted in the past 30 days” are insufficient evidence.
+   An empty `observed` result requires an actual readable activity list.
+4. `indiecorns worker discovery report --file /absolute/path/observation.json`.
+   Complete within two minutes. Delete the temporary observation afterward.
+
+The background CLI worker coordinates public-page checks automatically. Continuous
+signed-in reading requires a local host adapter. Configure a trusted executable
+using `worker discovery reader --command /absolute/path/to/reader --args-json '[]'`.
+It receives one JSON line on stdin (`platform`, `profileUrl`, `checkUrl`), must
+return exactly one observation JSON object on stdout, and has 90 seconds and 32 KB.
+The CLI adds the lease token. Use the host's supported browser/session capability;
+never copy browser profiles or credentials. Remove with `worker discovery reader
+--remove`. Inspect `worker discovery status` for delivery/source health. This
+configuration does not install a browser or make unsupported hosts unattended.
+
+No external data provider or paid model is required by the discovery protocol.
+Reader implementations may have their own costs. Worker-reported authorship stays
+an observation, not independent ownership verification or engagement proof.

@@ -575,3 +575,32 @@ not upgraded or restarted merely to add ongoing check-ins.
 GitHub CLI is required to reuse or authorize a member's own action credential;
 missing installation now points to https://cli.github.com/ before the login command.
 The public-profile OAuth step alone does not grant follow or star permissions.
+
+### Member post discovery
+
+The worker now claims short, exclusive profile checks from Indiecorns, prioritizes
+its member's own profile, and shares observed X/LinkedIn posts with the Herd.
+Checks back off when a source is quiet or blocked. A persistent outbox retries
+reports without creating duplicate posts. No external data provider is used.
+
+Public pages can be checked by the CLI. LinkedIn commonly needs a signed-in local
+reader; a running CLI alone does not provide that session. The host agent can use
+`worker discovery claim` and `worker discovery report --file observation.json`.
+For unattended reading, configure an existing trusted host reader with:
+
+```sh
+indiecorns worker discovery reader --command /absolute/path/to/reader --args-json '[]'
+indiecorns worker discovery status
+```
+
+The adapter reads `{version:1,platform,profileUrl,checkUrl}` on stdin and returns
+`{status,observedAt,posts:[{url,authorProfileUrl,title?}]}` on stdout. Status is
+`observed`, `auth_required`, `blocked` or `unavailable`; timestamps use epoch ms.
+It must match each post card's author, use the host's permitted browser and avoid
+exporting session data. It gets 90 seconds and 32 KB. No adapter is bundled or
+automatically installed; source requirements remain explicit until configured.
+
+These observations appear as member updates, without granting ownership
+verification, credits or automatic engagement. At a five-minute idle interval,
+each online worker adds up to 288 coordination requests per day plus reports;
+adaptive leases reduce actual platform reads across the community.

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {syncPostDiscovery,discoveryApi,validateReaderConfig} from "../lib/post-discovery.mjs"
 import {checkAccountHandoff,completedAccountMatches} from '../lib/account-handoff.mjs'
 
 import {
@@ -6879,6 +6880,27 @@ const main = async () => {
         printJson(result)
         return 0
       }
+      if (args[0] === "discovery") {
+        if(args[1]==="status") {printJson(workerStatus(directory).state?.postDiscovery??{health:"not_started"});return 0}
+        if(args[1]==="reader") {
+          const path=join(directory,"post-reader.json")
+          if(flags.remove){rmSync(path,{force:true});printJson({configured:false});return 0}
+          const config=validateReaderConfig({command:flags.command,args:JSON.parse(flags["args-json"]??"[]")})
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(path,config)
+          printJson({configured:true,command:config.command})
+          return 0
+        }
+        let body
+        if(args[1]==="claim") body={operation:"claim",platforms:flags.platform?[flags.platform]:["linkedin","x"]}
+        else if(args[1]==="report"&&flags.file) {
+          const contents=readFileSync(flags.file,"utf8")
+          if(Buffer.byteLength(contents)>32768)throw new Error("Observation exceeds 32 KB")
+          body={...JSON.parse(contents),operation:"report"}
+        } else throw new Error("Use worker discovery claim [--platform linkedin|x], report --file <observation.json>, or status")
+        printJson(await discoveryApi({appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),body}))
+        return 0
+      }
       if (args[0] === "status") {
         printJson(workerStatus(directory))
         return 0
@@ -6915,7 +6937,10 @@ const main = async () => {
               ? observeProducthuntProfile({target,token:producthuntToken,state:activeWorkerState,signal,checkpoint})
               : scrapeTarget({ target, hosts, signal, checkpoint })
           },
-          prioritize: updateSlack,
+          prioritize: async (state,signal,checkpoint) => {
+            await updateSlack(state,signal,checkpoint)
+            await syncPostDiscovery({state,directory,appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),signal,checkpoint})
+          },
           deriveTargets: memberCandidates,
           derivationRevision: "member-profile-repos-v3-issues",
           act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), producthuntToken:credential(directory,"producthunt"), accountRevision:accountRevision()}),
