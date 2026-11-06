@@ -28,8 +28,9 @@ export async function reportWorkerInstallation({directory,headers,appUrl,endpoin
   try {
     const url=new URL(endpoint,appUrl)
     if(url.origin!==new URL(appUrl).origin)return 'unavailable'
+    url.searchParams.set('installation_check','1')
     const response=await request(url,{method:'GET',headers:{...headers,'x-indiecorns-worker-evidence':proof},redirect:'error',signal:AbortSignal.timeout(10000)})
     await response.body?.cancel()
-    return response.ok&&response.headers.get('x-indiecorns-worker-evidence')==='accepted'?'reported':'unavailable'
+    return (response.ok||response.status===503)&&response.headers.get('x-indiecorns-worker-evidence')==='accepted'?'reported':'unavailable'
   }catch{return 'unavailable'}
 }

@@ -32,19 +32,19 @@ export function setupSummary(result, {mode = 'draft'} = {}) {
   }[result.state] ?? 'Setup needs your attention.']
   if (ready) {
     lines.push('You can close this terminal. Keep your computer awake, online and signed in.')
-    if (result.capabilities?.githubActions) lines.push('GitHub follows and stars follow your saved limits. Product Hunt and other platforms are not enabled.')
+    if (result.capabilities?.githubActions) lines.push('GitHub actions use your saved limits.')
     else lines.push('GitHub actions are not enabled in this mode.')
-    if(result.webVerification==='reported')lines.push('Your running-worker check is confirmed at https://app.indiecorns.com/join.')
-    else if(result.webVerification==='unavailable')lines.push('The worker is running, but the website could not confirm this check yet. Your local setup is preserved.')
+    if(result.webVerification==='reported')lines.push('Next: explore the Herd at https://app.indiecorns.com/herd')
+    else if(result.webVerification==='unavailable')lines.push('Website confirmation is pending. You do not need to repeat setup. Check https://app.indiecorns.com/join shortly.')
   }
   const needs = (result.steps ?? []).filter(s => !['verified', 'preserved', 'created', 'running', 'planned'].includes(s.status))
   if(needs.some(s=>s.id==='github'&&s.status==='installation_required'))lines.push('', 'Install GitHub CLI first: https://cli.github.com/')
   const retry = result.nextCommand ?? `indiecorns worker setup --mode ${mode} --wait`
   const next = needs.some(s => s.id === 'community_auth') ? retry : needs.find(s => s.nextCommand)?.nextCommand ?? result.nextCommand ?? (result.state === 'service_unavailable' ? retry : null)
-  if (next) lines.push('', ready ? 'Check health whenever you like:' : 'Next step:', `  ${command(next)}`)
+  if (next && !ready) lines.push('', 'Next step:', `  ${command(next)}`)
   if(result.state==='account_policy_mismatch')lines.push('Existing action limits and history are still bound to the previous account. Sign in to that account to use this worker, or contact support to preserve both accounts safely. No account binding was changed.')
   if (result.state === 'service_unavailable') lines.push('Your saved setup is preserved. Retry setup after the service recovers; you do not need to sign in again.')
-  if (ready) lines.push('', 'To stop and remove the background service:', `  ${cli} worker uninstall`)
+  if (ready) lines.push('', `Status: ${cli} worker setup --check`, `Stop:   ${cli} worker uninstall`)
   return lines.join('\n')
 }
 

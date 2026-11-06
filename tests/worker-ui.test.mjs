@@ -7,8 +7,15 @@ test('ready setup explains background lifetime, preserved limits and runnable np
   assert.match(setupStepText({id:'policy',status:'preserved',mode:'execute',maxExternalPerDay:1}),/at most 1 external attempt.*unchanged/)
   const text=setupSummary({state:'ready',steps:[],capabilities:{githubActions:true},nextCommand:'indiecorns worker health --hours 24'})
   assert.match(text,/close this terminal/);assert.doesNotMatch(text,/24 healthy hours passed/)
-  assert.match(text,/npx --yes indiecorns@latest worker health --hours 24/)
+  assert.match(text,/npx --yes indiecorns@latest worker setup --check/)
   assert.match(text,/worker uninstall/);assert.doesNotMatch(text,/\"version\"|\"steps\"/)
+})
+
+test('completion leads to the Herd and a delayed website acknowledgement never asks for another setup',()=>{
+  assert.match(setupSummary({state:'ready',webVerification:'reported',steps:[]}),/Next: explore the Herd/)
+  const pending=setupSummary({state:'ready',webVerification:'unavailable',steps:[]})
+  assert.match(pending,/You do not need to repeat setup/)
+  assert.doesNotMatch(pending,/Check health whenever|worker setup --mode/)
 })
 
 test('incomplete authorization shows the actual prerequisite instead of a misleading success',()=>{
