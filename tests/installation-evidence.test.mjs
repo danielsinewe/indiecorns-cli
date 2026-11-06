@@ -22,9 +22,11 @@ test('reports inspect actual service identity and recent heartbeat without colle
 })
 test('verification uses one bounded read-only request, requires server acknowledgement and never retries or invokes an engagement adapter',async()=>{
  let calls=0
- const options={directory:'unused',headers,appUrl:'https://app.indiecorns.com',version:'0.4.15',evidence:()=> 'PROOF',request:async(url,o)=>{calls++;assert.equal(url.origin,'https://app.indiecorns.com');assert.equal(o.method,'GET');assert.equal(o.redirect,'error');assert.equal(o.headers['x-indiecorns-worker-evidence'],'PROOF');return new Response('{}',{headers:{'x-indiecorns-worker-evidence':'accepted'}})}}
+ const options={directory:'unused',headers,appUrl:'https://app.indiecorns.com',version:'0.4.15',evidence:()=> 'PROOF',request:async(url,o)=>{calls++;assert.equal(url.origin,'https://app.indiecorns.com');assert.equal(url.searchParams.get('installation_check'),'1');assert.equal(o.method,'GET');assert.equal(o.redirect,'error');assert.equal(o.headers['x-indiecorns-worker-evidence'],'PROOF');return new Response('{}',{headers:{'x-indiecorns-worker-evidence':'accepted'}})}}
  assert.equal(await reportWorkerInstallation(options),'reported');assert.equal(calls,1)
  assert.equal(await reportWorkerInstallation({...options,evidence:()=>null}),'not_verified');assert.equal(calls,1)
  assert.equal(await reportWorkerInstallation({...options,request:async()=>new Response('{}')}),'unavailable')
  assert.equal(await reportWorkerInstallation({...options,request:async()=>new Response('{}',{status:429,headers:{'retry-after':'600'}})}),'unavailable')
+ assert.equal(await reportWorkerInstallation({...options,request:async()=>new Response('{}',{status:503,headers:{'x-indiecorns-worker-evidence':'accepted'}})}),'reported')
+ assert.equal(await reportWorkerInstallation({...options,request:async()=>new Response('{}',{status:401,headers:{'x-indiecorns-worker-evidence':'accepted'}})}),'unavailable')
 })

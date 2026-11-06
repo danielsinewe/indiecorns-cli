@@ -1,3 +1,8 @@
+# 0.4.18
+
+- Confirm computer setup without waiting for Slack history. A recorded setup check remains acknowledged when discovery is temporarily unavailable.
+- Shorten successful Terminal setup output, point to the Herd, and explain that delayed website confirmation does not require repeating setup. Existing workers, permissions, and limits stay in place.
+
 # 0.4.17
 
 - Recover from temporary DNS lookup failures with one-minute scheduled read retries across discovery, community feed and member posts. Explicit provider cooldowns, historical failure samples, receipts and limits stay intact. Member-post failures now retain sanitized diagnostics.
