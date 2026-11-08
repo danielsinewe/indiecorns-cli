@@ -244,3 +244,30 @@ stops, or claim 24-hour coverage from a single observed cycle. No external data
 provider or model API is called by the CLI; active agents/readers may have their
 own costs. Worker observations do not independently verify ownership or prove
 engagement. Read-only discoveries must not authorize likes, reposts or comments.
+
+## Native unattended member-post schedule
+
+When the user requests recurring/continuous member-post discovery and this host
+provides its native automation tool, run `worker discovery schedule --json` for
+the current installed CLI's bounded handoff. Inspect existing native automations
+first. Reuse a matching member-post schedule, preserving its fields; do not
+repurpose worker audits, create duplicate schedules, edit automation files or
+invent a private scheduler API. Use the native tool to create/update the schedule
+under the user's authorized scope and keep its returned automation ID.
+
+The default is hourly with an account-staggered phase and at most two source
+checks per run. Make host-subscription usage and awake/online/app/session
+requirements explicit. In the native scheduled turn, import the returned reader
+module in the trusted browser session and call
+`runScheduledDiscovery({browser,nodeExecutable,cliPath,appUrl,automationId})`.
+Use the native automation's actual ID. The helper claims one task per platform,
+performs permitted reads and records its account-bound result. A null task is
+normal. Do not self-trigger or use this schedule to track CI, deployments, goal
+progress or unrelated work. Source sign-in/blocks are requirements, not permission
+to switch browsers or manufacture success. Preserve existing user tabs.
+
+Require actual scheduler dispatch and matching source/report evidence before
+claiming an unattended run. A configured schedule, a manually invoked helper, or
+a client checkpoint alone is insufficient. Do not infer 24-hour coverage or all
+members' readiness from a single run. This path works through a new active host
+turn each time; it never keeps private browser RPC alive outside an active turn.

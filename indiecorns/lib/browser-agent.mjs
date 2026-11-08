@@ -29,8 +29,26 @@ export async function runBrowserDiscoveryOnce({browser,nodeExecutable,cliPath,ap
   if(!Number.isSafeInteger(claimed.task.expiresAt)||claimed.task.expiresAt<=now())throw new Error('Discovery lease expired')
   const observation=await readMemberActivity({browser,task:claimed.task,onState,now})
   const report=await execute(connection,['report','--stdin'],{leaseToken:claimed.task.leaseToken,...observation},signal)
-  if(report.queued===true)return {state:'report_queued',posts:observation.posts.length,lifetime:'active_agent_session',continuousSignedInCoverage:false}
+  if(report.queued===true)return {state:'report_queued',sourceStatus:observation.status,observedAt:observation.observedAt,posts:observation.posts.length,lifetime:'active_agent_session',continuousSignedInCoverage:false}
   if(report.accepted!==true)throw new Error('Discovery observation was not accepted')
-  return {state:observation.status,posts:observation.posts.length,inserted:report.inserted??0,nextCheckAfterMs:report.nextCheckAfterMs??null,
+  return {state:observation.status,observedAt:observation.observedAt,posts:observation.posts.length,inserted:report.inserted??0,nextCheckAfterMs:report.nextCheckAfterMs??null,
     lifetime:'active_agent_session',continuousSignedInCoverage:false}
+}
+
+// A native scheduled host turn supplies an active trusted browser context. This
+// does not keep browser RPC alive between turns or install a second scheduler.
+export async function runScheduledDiscovery(options) {
+  if(typeof options.automationId!=='string'||!/^[-a-z0-9_]{1,100}$/i.test(options.automationId))throw new Error('Native automation ID required')
+  const results=[]
+  for(const platform of ['linkedin','x']) {
+    if(options.signal?.aborted)break
+    const result=await runBrowserDiscoveryOnce({...options,platform})
+    results.push({platform,...result})
+  }
+  if(!results.length)return {state:'aborted',results}
+  const checkedAt=(options.now??Date.now)()
+  const report={automationId:options.automationId,checkedAt,results}
+  const recorded=await (options.execute??cliRequest)(options,['record-run','--stdin'],report,options.signal)
+  if(recorded.recorded!==true)throw new Error('Scheduled discovery result was not recorded')
+  return {state:'completed',automationId:options.automationId,checkedAt,results,recorded:true,continuousSignedInCoverage:false}
 }
