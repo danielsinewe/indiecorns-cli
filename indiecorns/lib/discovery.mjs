@@ -6,6 +6,7 @@ export const discoverySources = [
   ...['x', 'linkedin'].flatMap(platform => ['like', 'reshare', 'comment'].map(eventType => ({ platform, eventType, targetSource: 'posts' }))),
   ...['upvote', 'rate'].map(eventType => ({ platform: 'peerlist', eventType, targetSource: 'projects' })),
   { platform: 'producthunt', eventType: 'upvote', targetSource: 'projects' },
+  ...['x','linkedin'].map(platform=>({platform,eventType:'inspect',targetSource:'posts'})),
 ]
 export function retryDelay(value, now = Date.now()) {
   if (!value) return 60000

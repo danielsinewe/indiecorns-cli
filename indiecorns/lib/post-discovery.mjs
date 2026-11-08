@@ -1,3 +1,4 @@
+import {flushPostReports} from './post-outbox.mjs'
 import {spawn} from 'node:child_process'
 import {readFileSync,existsSync} from 'node:fs'
 import {join,isAbsolute} from 'node:path'
@@ -37,8 +38,9 @@ export async function discoveryApi({appUrl,headers,body,request=fetch,signal}) {
     redirect:'error',signal:AbortSignal.any([signal??new AbortController().signal,AbortSignal.timeout(30000)]),body:JSON.stringify(body)})
   if(!response.ok) {
     const retryAfterMs=retryDelay(response.headers.get('retry-after'))
-    await response.body?.cancel()
-    throw Object.assign(new Error('Post discovery unavailable'),{httpStatus:response.status,retryAfterMs})
+    let code
+    try {const error=JSON.parse(await boundedText(response,4096));if(error.code==='MEMBER_PROFILE_REQUIRED')code=error.code}catch{}
+    throw Object.assign(new Error('Post discovery unavailable'),{httpStatus:response.status,retryAfterMs,...(code?{code}:{})})
   }
   return JSON.parse(await boundedText(response,32768))
 }
@@ -61,6 +63,7 @@ export async function syncPostDiscovery({state,directory,appUrl,headers,request=
   checkpoint()
   const call=body=>discoveryApi({appUrl,headers,body,request,signal})
   try {
+    if(directory)discovery.delivery=await flushPostReports({directory,appUrl,headers,send:call,now:now()})
     if(discovery.pendingReport) {
       try {await call({operation:'report',...discovery.pendingReport})}
       catch(error) {if(error.httpStatus!==409)throw error}
@@ -70,9 +73,10 @@ export async function syncPostDiscovery({state,directory,appUrl,headers,request=
     }
     if(!discovery.task||discovery.task.expiresAt<=now()) {
       delete discovery.task
-      const response=await call({operation:'claim',platforms:['linkedin','x']})
+      const reader=directory&&existsSync(join(directory,'post-reader.json'))?'local':'public'
+      const response=await call({operation:'claim',reader,platforms:['linkedin','x']})
       if(response.version!==1)throw new Error('Invalid discovery contract')
-      if(!response.task){discovery.health='idle';checkpoint();return}
+      if(!response.task){discovery.health='idle';discovery.nextPollAt=now()+Math.max(60000,Math.min(3600000,response.retryAfterMs??300000));checkpoint();return}
       const task=response.task
       if(typeof task.leaseToken!=='string'||!profileIdentity(task.platform,task.profileUrl)||
         !Number.isSafeInteger(task.expiresAt)||task.expiresAt<=now()||task.expiresAt>now()+180000||
@@ -85,6 +89,8 @@ export async function syncPostDiscovery({state,directory,appUrl,headers,request=
     // after that cooldown rather than marking a healthy source unavailable.
     const observation=validatePostObservation(task,await observe(task,state.hosts??={},checkpoint),now())
     discovery.pendingReport={leaseToken:task.leaseToken,...observation}
+    discovery.sources??={}
+    discovery.sources[task.platform]={status:observation.status,observedAt:observation.observedAt,posts:observation.posts.length}
     discovery.sourceStatus=observation.status
     discovery.lastObservationAt=observation.observedAt
     discovery.lastPostCount=observation.posts.length
@@ -99,7 +105,7 @@ export async function syncPostDiscovery({state,directory,appUrl,headers,request=
       discovery.health='host_cooldown'
       discovery.nextPollAt=error.retryAt
     } else {
-      discovery.health=[401,403].includes(error.httpStatus)?'auth_required':error.httpStatus===404?'server_upgrade_required':'unavailable'
+      discovery.health=error.code==='MEMBER_PROFILE_REQUIRED'?'profile_required':[401,403].includes(error.httpStatus)?'auth_required':error.httpStatus===404?'server_upgrade_required':'unavailable'
       discovery.nextPollAt=now()+Math.max(300000,error.retryAfterMs??0)
       if(error.httpStatus===404)discovery.nextPollAt=now()+3600000
     }

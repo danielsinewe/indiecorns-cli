@@ -11,7 +11,7 @@ export function discoveryError(error,stage='request',source) {
     error?.name==='TimeoutError'||code?.includes('TIMEOUT')||code==='ETIMEDOUT'?'timeout':code||stage==='request'&&error?.name==='TypeError'?'transport':
     stage==='body'||stage==='contract'?'invalid_response':'unknown'
   return {kind,stage:stages.has(stage)?stage:'request',...(code?{code}:{}),
-    ...(typeof source==='string'&&/^(peerlist|x|linkedin|producthunt)\/(follow|like|reshare|comment|upvote|rate)\/(profiles|posts|projects)$/.test(source)?{source}:{})}
+    ...(typeof source==='string'&&/^(peerlist|x|linkedin|producthunt)\/(inspect|follow|like|reshare|comment|upvote|rate)\/(profiles|posts|projects)$/.test(source)?{source}:{})}
 }
 export function safeDiscoveryError(error) {
   const candidate=error?.discoveryError

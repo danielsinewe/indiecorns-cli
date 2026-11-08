@@ -1,3 +1,4 @@
+export const validLeaseToken=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value)
 // Shared by the platform and local workers. URLs carry no tracking parameters.
 export function profileIdentity(platform, value) {
   try {

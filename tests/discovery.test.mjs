@@ -14,11 +14,12 @@ test('discovery explicitly queries profiles, projects, posts and all four platfo
     assert.equal(options.redirect, 'error')
     return Response.json({ targets: [{profileUrl: 'https://peerlist.io/maker'}] })
   } })
-  assert.equal(queries.length, 13)
+  assert.equal(queries.length, 15)
   assert.deepEqual(new Set(queries.map(q => q.platform)), new Set(['x','linkedin','peerlist','producthunt']))
   assert.deepEqual(new Set(queries.map(q => q.targetSource)), new Set(['profiles','posts','projects']))
-  assert.equal(result.targets.length, 13)
+  assert.equal(result.targets.length, 15)
   assert.equal(result.partial, false)
+  assert.deepEqual(queries.filter(q=>q.eventType==='inspect').map(q=>[q.platform,q.targetSource]),[['x','posts'],['linkedin','posts']])
 })
 
 test('rate limit preserves collected targets and stops remaining API requests', async () => {
@@ -43,8 +44,8 @@ test('a full API page remains useful but cannot claim complete discovery without
   let calls=0
   const result=await discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async()=>{},
     request:async()=>Response.json({targets:Array.from({length:++calls===1?200:1},(_,index)=>({profileUrl:`https://peerlist.io/maker${index}`}))})})
-  assert.equal(calls,13)
-  assert.equal(result.targets.length,212)
+  assert.equal(calls,15)
+  assert.equal(result.targets.length,214)
   assert.equal(result.partial,true)
   assert.equal(result.sources[0].status,'capacity_limited')
   assert.equal(result.sources[0].atCapacity,true)
@@ -66,7 +67,7 @@ test('page budgets continue from durable progress and skip already-complete sour
   assert.equal(first.targets.length,400)
   assert.equal(first.partial,true)
   assert.equal(first.continuation,true)
-  assert.equal(calls.length,14)
+  assert.equal(calls.length,16)
   assert.equal(first.progress[discoverySourceKey(discoverySources[0])].cursor,'400')
   calls.length=0
   const next=await discoverCommunity({...options,progress:first.progress})
@@ -136,7 +137,7 @@ test('a single bounded GET retry recovers a transient connection failure and rep
   let calls=0;const pauses=[]
   const result=await discoverCommunity({appUrl:'https://app.indiecorns.com',endpoint:'/targets',headers:{},pause:async ms=>pauses.push(ms),
     request:async()=>{calls++;if(calls===1)throw Object.assign(new TypeError('private-message'),{cause:{code:'ECONNRESET'}});return Response.json({targets:[]})}})
-  assert.equal(calls,14);assert.equal(result.partial,false);assert.equal(result.sources[0].transportRetries,1);assert.equal(pauses[0],1000)
+  assert.equal(calls,16);assert.equal(result.partial,false);assert.equal(result.sources[0].transportRetries,1);assert.equal(pauses[0],1000)
   assert.doesNotMatch(JSON.stringify(result),/private-message/)
 })
 
