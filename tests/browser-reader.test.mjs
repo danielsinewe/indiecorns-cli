@@ -38,3 +38,22 @@ test('active agent performs one lease/read/report cycle without recording contin
  assert.equal(calls[1].input.posts[0].url,own);assert.equal(closed,1)
  assert.equal(calls[0].args[2],'browser')
 })
+test('X waits for hydration, keeps actual authors and closes the temporary tab',async()=>{
+ const x={platform:'x',profileUrl:'https://x.com/member',checkUrl:'https://x.com/member'}
+ const url='https://x.com/member/status/123456789'
+ const ready={url:x.checkUrl,activityVisible:true,cards:[
+  {authorProfileUrl:x.profileUrl,links:[url,url+'/analytics']},
+  {authorProfileUrl:'https://x.com/other',links:['https://x.com/other/status/987654321']},
+  {authorProfileUrl:x.profileUrl,links:[url,'https://x.com/member/status/987654321']}
+ ]}
+ let reads=0,waits=0,closed=0
+ const page={url:async()=>x.checkUrl,ax:{get:async()=>'Loading'},playwright:{evaluate:async()=>++reads<3?{url:x.checkUrl,cards:[]}:ready},close:async()=>closed++}
+ const options={browser:{tabs:{new:async()=>page}},task:x,wait:async()=>waits++,now:()=>now,maxReadinessChecks:4}
+ const result=await readMemberActivity(options)
+ assert.equal(result.status,'observed');assert.equal(result.posts.length,1);assert.equal(result.posts[0].url,url)
+ assert.equal(reads,3);assert.equal(waits,2);assert.equal(closed,1)
+ reads=0;page.playwright.evaluate=async()=>{reads++;return {url:x.checkUrl,cards:[]}}
+ assert.equal((await readMemberActivity(options)).status,'unavailable');assert.equal(reads,4)
+ reads=0;page.playwright.evaluate=async()=>{reads++;return {url:'https://x.com/i/flow/login',authRequired:true,cards:[]}}
+ assert.equal((await readMemberActivity(options)).status,'auth_required');assert.equal(reads,1)
+})

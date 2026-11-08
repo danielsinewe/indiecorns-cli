@@ -1,3 +1,7 @@
+# 0.5.2
+
+- Wait for rendered X and LinkedIn timelines before classifying source availability. Keep the wait bounded and preserve login requirements, author matching and temporary-tab cleanup.
+
 # 0.4.18
 
 - Confirm computer setup without waiting for Slack history. A recorded setup check remains acknowledged when discovery is temporarily unavailable.

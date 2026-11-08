@@ -1,6 +1,6 @@
 {
 	"name": "indiecorns",
-	"version": "0.5.1",
+	"version": "0.5.2",
 	"description": "Indiecorns community CLI, local discovery worker and browser reader for member posts.",
 	"type": "module",
 	"homepage": "https://indiecorns.com",
