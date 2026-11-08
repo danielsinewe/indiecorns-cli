@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {nativeScheduleHandoff,recordNativeRun} from "../lib/native-post-schedule.mjs"
 import {discoveryStatus,discoveryStatusText} from "../lib/post-discovery-status.mjs"
 import {stagePostReport,flushPostReports} from "../lib/post-outbox.mjs"
 import {syncPostDiscovery,discoveryApi,validateReaderConfig} from "../lib/post-discovery.mjs"
@@ -144,6 +145,7 @@ Commands:
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
   worker discovery status        Inspect post sources, delivery and reader requirements
   worker discovery agent         Get the bundled reader for your active agent session
+  worker discovery schedule      Prepare a native host schedule (--interval-minutes 60)
   worker discovery claim         Claim one member-profile check (--platform linkedin|x)
   worker discovery report --stdin  Submit an author-bound observation JSON object
   worker discovery reader        Configure an existing trusted local reader
@@ -6890,7 +6892,7 @@ const main = async () => {
       }
       if (args[0] === "discovery") {
         if(args[1]==="status") {
-          const report=discoveryStatus({directory,state:workerStatus(directory).state})
+          const report=discoveryStatus({directory,state:workerStatus(directory).state,accountRevision:credentialRevision(getCliAuthHeaders())})
           if(flags.json||flags.agent||flags.ndjson)printJson(report)
           else console.log(discoveryStatusText(report))
           return 0
@@ -6904,11 +6906,25 @@ const main = async () => {
           printJson({configured:true,command:config.command})
           return 0
         }
+        if(args[1]==="schedule") {
+          if(!getCliAuthHeaders())throw new Error("Connect your Indiecorns account before scheduling checks")
+          printJson(nativeScheduleHandoff({nodeExecutable:process.execPath,cliPath:fileURLToPath(import.meta.url),appUrl:getAppUrl(flags),
+            accountRevision:credentialRevision(getCliAuthHeaders()),intervalMinutes:Number(flags["interval-minutes"]??60)}))
+          return 0
+        }
+        if(args[1]==="record-run") {
+          if(!flags.stdin||process.stdin.isTTY)throw new Error("Pipe the native scheduled run JSON on stdin")
+          if(!getCliAuthHeaders())throw new Error("Connect your Indiecorns account before recording a scheduled run")
+          let contents=""
+          for await(const chunk of process.stdin){contents+=chunk.toString("utf8");if(Buffer.byteLength(contents)>16384)throw new Error("Scheduled result exceeds 16 KB")}
+          printJson(recordNativeRun({directory,accountRevision:credentialRevision(getCliAuthHeaders()),body:JSON.parse(contents)}))
+          return 0
+        }
         if(args[1]==="agent") {
           printJson({version:1,readerModule:fileURLToPath(new URL("../lib/browser-agent.mjs",import.meta.url)),nodeExecutable:process.execPath,cliPath:fileURLToPath(import.meta.url),appUrl:getAppUrl(flags),
             browserPolicy:"Select the host's permitted browser first. Keep it in the background. No local Chrome fallback.",
             instruction:"Import readerModule inside the host's trusted Node browser session. Call runBrowserDiscoveryOnce({browser,nodeExecutable,cliPath,appUrl}). It claims a check, reads visible author-bound post cards and reports the observation. Never run a private browser RPC outside the host session.",
-            lifetime:"active_agent_session",continuousSignedInCoverage:false})
+            lifetime:"active_agent_session",scheduledRunSupported:true,scheduleCommand:"indiecorns worker discovery schedule --json",continuousSignedInCoverage:false})
           return 0
         }
         let body
@@ -6941,7 +6957,7 @@ const main = async () => {
         return 0
       }
       if (args[0] === "health") {
-        const report={...readHealthReport(directory,{hours:Number(flags.hours??24)}),postDiscovery:discoveryStatus({directory,state:workerStatus(directory).state})}
+        const report={...readHealthReport(directory,{hours:Number(flags.hours??24)}),postDiscovery:discoveryStatus({directory,state:workerStatus(directory).state,accountRevision:credentialRevision(getCliAuthHeaders())})}
         if(flags.ndjson)printNdjson(report)
         else if(flags.json||flags.agent)printJson(report)
         else console.log(healthText(report)+"\n\n"+discoveryStatusText(report.postDiscovery))

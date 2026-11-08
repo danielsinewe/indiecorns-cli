@@ -621,3 +621,30 @@ The CLI makes no paid model or data-provider calls. Five-minute idle polling add
 up to 288 coordination requests per worker/day plus reports. Active agents and
 custom readers may have their own costs. Adaptive shared leases reduce actual
 source reads across the community.
+
+### Native scheduled browser checks
+
+```sh
+npx --yes indiecorns@latest worker discovery schedule --json
+```
+
+This returns a bounded handoff for an agent with the native Codex automation tool.
+It prepares a schedule; it does not create one or modify scheduler files. The
+agent must inspect existing schedules and create/reuse the matching member-post
+schedule through the native tool. Worker audits and unrelated schedules stay
+unchanged. The default is hourly, at most 24 runs and 48 source checks per day.
+The phase is staggered by account to spread community work.
+
+Each scheduled host turn supplies the active trusted browser context required by
+ChatGPT. The agent calls `runScheduledDiscovery` from the bundled browser-agent
+module with its permitted browser and the native automation ID. The function
+checks at most one LinkedIn and one X task, honors server cooldowns and records
+its small result through `worker discovery record-run --stdin`. Newer scheduled
+observations appear in discovery status; idle checks do not refresh source times.
+Account changes cannot reuse another account's reported results.
+
+The computer must be awake/online, the host app must be running, and the permitted
+browser must have the required session. This consumes the host subscription's
+execution capacity; it does not make a paid model API call from the CLI. Native
+schedules can be managed in the host app. Enabling a schedule or recording one
+run is not proof of 24-hour coverage or other members' installations.

@@ -39,6 +39,18 @@
 
 # Changelog
 
+## 0.5.1 — 2026-11-08
+
+- Add a native host automation handoff for unattended member-post checks. The
+  host scheduler starts an active browser session for each bounded run; the CLI
+  never calls private browser RPC in the background or writes scheduler files.
+- Default to hourly runs, at most one LinkedIn and one X check per run, with
+  explicit host-subscription usage and required awake/online app conditions.
+- Record account-bound scheduled results and merge their newer observations into
+  local source status. Idle runs never fabricate fresh source observations.
+- Keep continuous signed-in coverage unproven until actual history establishes it.
+
+
 ## 0.5.0 — 2026-11-08
 
 - Coordinate member-local post checks with exclusive leases, own-profile priority,
