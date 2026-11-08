@@ -39,6 +39,22 @@
 
 # Changelog
 
+## 0.5.0 — 2026-11-08
+
+- Coordinate member-local post checks with exclusive leases, own-profile priority,
+  reader-specific recovery and adaptive source cooldowns.
+- Bundle a signed-in browser reader for active agent sessions. It reads visible
+  author-bound cards, rejects reposts/ambiguous quotes, and closes temporary tabs.
+  `worker discovery agent` supplies the exact packaged runtime paths.
+- Persist account-bound post reports through outages and distribute unverified
+  discoveries as read-only inspection targets, separate from engagement actions.
+- Add readable `worker discovery status`, bounded stdin reports, and explicit
+  source/authentication/cost requirements in health output.
+- Update parse5 to 8.1.1 and posthog-node to 5.63.1. No new dependencies.
+- Continuous signed-in coverage requires a supported active host or an existing
+  local reader. A background CLI process alone does not establish that coverage.
+
+
 ## 0.4.11 - 2026-11-03
 
 - Diagnose discovery failures with bounded, sanitized error metadata and retry

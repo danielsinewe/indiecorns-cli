@@ -575,3 +575,49 @@ not upgraded or restarted merely to add ongoing check-ins.
 GitHub CLI is required to reuse or authorize a member's own action credential;
 missing installation now points to https://cli.github.com/ before the login command.
 The public-profile OAuth step alone does not grant follow or star permissions.
+
+### Member post discovery
+
+The worker claims exclusive profile checks from Indiecorns, prioritizes its
+member's own profile and shares observed X/LinkedIn posts with the Herd and other
+workers. Reader-specific cooldowns let signed-in agents cover public-page access
+gaps. Account-bound reports survive temporary outages and canonical URLs prevent
+duplicate posts. No external data provider is used.
+
+```sh
+npx --yes indiecorns@latest worker discovery status
+npx --yes indiecorns@latest worker discovery agent --json
+```
+
+The second command returns the bundled browser-reader module and runtime paths.
+An active agent imports it in its trusted browser session and calls
+`runBrowserDiscoveryOnce({browser,nodeExecutable,cliPath,appUrl})` with its
+already-permitted browser. The reader checks visible post cards, matches the
+actual author, excludes reposts/ambiguous quotes and closes temporary tabs. It
+never launches another browser or copies cookies. Browser/host policy applies.
+
+Other hosts can claim and report using `worker discovery claim --reader browser`
+and `worker discovery report --stdin`. JSON reports contain
+`{leaseToken,status,observedAt,posts:[{url,authorProfileUrl,title?}]}`. Use epoch-ms
+timestamps and `observed`, `auth_required`, `blocked` or `unavailable` status.
+
+For an existing unattended local reader:
+
+```sh
+indiecorns worker discovery reader --command /absolute/path/to/reader --args-json '[]'
+```
+
+The adapter receives `{version:1,platform,profileUrl,checkUrl}` on stdin and
+returns the observation JSON on stdout, with a 90-second and 32-KB limit. The CLI
+adds the lease token. This does not install a browser or grant a source session.
+
+A running CLI alone cannot read authenticated LinkedIn activity. ChatGPT browser
+checks run during active agent calls, not after the agent stops. `worker health`
+and discovery status expose this requirement; they do not claim continuous
+signed-in coverage. Source observations retain unverified ownership and cannot
+authorize engagement or credits.
+
+The CLI makes no paid model or data-provider calls. Five-minute idle polling adds
+up to 288 coordination requests per worker/day plus reports. Active agents and
+custom readers may have their own costs. Adaptive shared leases reduce actual
+source reads across the community.

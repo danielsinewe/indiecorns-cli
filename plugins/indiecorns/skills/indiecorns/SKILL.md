@@ -199,3 +199,48 @@ Preserve these contracts during release work:
 If local `npm publish` fails with `E401` or `E404`, treat that as an auth or npm
 permission boundary for the local token, then use the public GitHub Actions
 workflow before reporting a blocker.
+
+## Local member-post discovery
+
+The CLI coordinates public checks in the background. For signed-in reading during
+an authorized agent session, run `indiecorns worker discovery agent --json`.
+It returns `readerModule`, `nodeExecutable`, `cliPath` and `appUrl`. In the host's
+trusted Node/browser session, import that exact module and call:
+
+```js
+await reader.runBrowserDiscoveryOnce({browser, nodeExecutable, cliPath, appUrl})
+```
+
+`browser` must be the host's already-selected permitted browser. Always follow
+its browser-selection rules: ChatGPT cloud browser first when available, then
+ChatGPT in-app browser; never silently select local Chrome. Keep work in the
+background. The bundled reader claims one short lease, reads the exact assigned
+activity page, matches each post card's author, excludes reposts and ambiguous
+quoted posts, reports canonical links, and closes only tabs it created.
+
+Use `worker discovery status --json` to inspect source requirements and pending
+reports. `profile_required` means connect the member profile at /join, not repeat
+account login. `auth_required` means that source needs its own signed-in session.
+
+For other supported hosts, `worker discovery claim --reader browser --platform
+linkedin` (or `x`) returns one task. Report through `worker discovery report
+--stdin` with a small JSON object containing `leaseToken`, `observedAt` in epoch
+ms, `status` (`observed`, `auth_required`, `blocked`, `unavailable`) and `posts`.
+Each post needs `url`, `authorProfileUrl`, and optionally a short `title`. An empty
+`observed` result needs an explicitly readable empty activity list; relative age
+hints and “posted in the past 30 days” do not prove a post. Never export cookies,
+credentials or whole pages. Reports persist privately until acknowledged, expired
+or rejected; retries stay bound to the same account.
+
+An existing trusted unattended reader can be configured with `worker discovery
+reader --command /absolute/path/to/reader --args-json '[]'`. It receives one JSON
+line on stdin (`platform`, `profileUrl`, `checkUrl`), returns one observation JSON
+object, and gets 90 seconds and 32 KB. Remove with `worker discovery reader
+--remove`. This is an optional host adapter, not a bundled browser subprocess.
+
+ChatGPT's browser runtime requires an active agent call. Do not put its private
+RPC in a background process, copy its session, promise it runs after the agent
+stops, or claim 24-hour coverage from a single observed cycle. No external data
+provider or model API is called by the CLI; active agents/readers may have their
+own costs. Worker observations do not independently verify ownership or prove
+engagement. Read-only discoveries must not authorize likes, reposts or comments.

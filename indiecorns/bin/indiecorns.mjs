@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import {discoveryStatus,discoveryStatusText} from "../lib/post-discovery-status.mjs"
+import {stagePostReport,flushPostReports} from "../lib/post-outbox.mjs"
+import {syncPostDiscovery,discoveryApi,validateReaderConfig} from "../lib/post-discovery.mjs"
 import {checkAccountHandoff,completedAccountMatches} from '../lib/account-handoff.mjs'
 
 import {
@@ -6,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -138,6 +142,11 @@ Commands:
   worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
+  worker discovery status        Inspect post sources, delivery and reader requirements
+  worker discovery agent         Get the bundled reader for your active agent session
+  worker discovery claim         Claim one member-profile check (--platform linkedin|x)
+  worker discovery report --stdin  Submit an author-bound observation JSON object
+  worker discovery reader        Configure an existing trusted local reader
   worker policy                  Show action policy; configure exact GitHub targets
   worker slack source <mode>     Choose auto, community, or local Slack discovery
   community-queue [platform]     Show a flat queue of community action targets
@@ -6879,15 +6888,63 @@ const main = async () => {
         printJson(result)
         return 0
       }
+      if (args[0] === "discovery") {
+        if(args[1]==="status") {
+          const report=discoveryStatus({directory,state:workerStatus(directory).state})
+          if(flags.json||flags.agent||flags.ndjson)printJson(report)
+          else console.log(discoveryStatusText(report))
+          return 0
+        }
+        if(args[1]==="reader") {
+          const path=join(directory,"post-reader.json")
+          if(flags.remove){rmSync(path,{force:true});printJson({configured:false});return 0}
+          const config=validateReaderConfig({command:flags.command,args:JSON.parse(flags["args-json"]??"[]")})
+          mkdirSync(directory,{recursive:true,mode:0o700})
+          saveState(path,config)
+          printJson({configured:true,command:config.command})
+          return 0
+        }
+        if(args[1]==="agent") {
+          printJson({version:1,readerModule:fileURLToPath(new URL("../lib/browser-agent.mjs",import.meta.url)),nodeExecutable:process.execPath,cliPath:fileURLToPath(import.meta.url),appUrl:getAppUrl(flags),
+            browserPolicy:"Select the host's permitted browser first. Keep it in the background. No local Chrome fallback.",
+            instruction:"Import readerModule inside the host's trusted Node browser session. Call runBrowserDiscoveryOnce({browser,nodeExecutable,cliPath,appUrl}). It claims a check, reads visible author-bound post cards and reports the observation. Never run a private browser RPC outside the host session.",
+            lifetime:"active_agent_session",continuousSignedInCoverage:false})
+          return 0
+        }
+        let body
+        if(args[1]==="claim") body={operation:"claim",reader:flags.reader??"browser",platforms:flags.platform?[flags.platform]:["linkedin","x"]}
+        else if(args[1]==="report"&&(flags.file||flags.stdin)) {
+          let contents=""
+          if(flags.file) {
+            if(statSync(flags.file).size>32768)throw new Error("Observation exceeds 32 KB")
+            contents=readFileSync(flags.file,"utf8")
+          } else {
+            if(process.stdin.isTTY)throw new Error("Pipe an observation JSON object on stdin")
+            for await(const chunk of process.stdin) {
+              contents+=chunk.toString("utf8")
+              if(Buffer.byteLength(contents)>32768)throw new Error("Observation exceeds 32 KB")
+            }
+          }
+          body={...JSON.parse(contents),operation:"report"}
+        } else throw new Error("Use worker discovery status, agent, claim [--platform linkedin|x], report --stdin, or reader")
+        if(body.operation==="report") {
+          const appUrl=getAppUrl(flags),headers=getCliAuthHeaders()
+          if(!headers)throw new Error("Connect your Indiecorns account before reporting posts")
+          stagePostReport({directory,appUrl,headers,body})
+          const delivery=await flushPostReports({directory,appUrl,headers,send:body=>discoveryApi({appUrl,headers,body})})
+          printJson(delivery.lastReceipt??{accepted:false,queued:delivery.pending>0,delivery})
+        } else printJson(await discoveryApi({appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),body}))
+        return 0
+      }
       if (args[0] === "status") {
         printJson(workerStatus(directory))
         return 0
       }
       if (args[0] === "health") {
-        const report=readHealthReport(directory,{hours:Number(flags.hours??24)})
+        const report={...readHealthReport(directory,{hours:Number(flags.hours??24)}),postDiscovery:discoveryStatus({directory,state:workerStatus(directory).state})}
         if(flags.ndjson)printNdjson(report)
         else if(flags.json||flags.agent)printJson(report)
-        else console.log(healthText(report))
+        else console.log(healthText(report)+"\n\n"+discoveryStatusText(report.postDiscovery))
         return 0
       }
       if (args[0] !== "run") throw new Error("Use worker run [--once] or worker status")
@@ -6900,7 +6957,7 @@ const main = async () => {
           directory,
           authRevision: credentialRevision(getCliAuthHeaders()),
           authRevisionAliases: [getCliAuthHeaders(),...workerHeaderAliases()].map(headers=>createHash("sha256").update(JSON.stringify(headers)).digest("hex")),
-          discoveryRevision: "community-13-pages-v2",
+          discoveryRevision: "community-observations-v3",
           once: Boolean(flags.once),
           intervalMs: Number(flags["interval-seconds"] ?? 300) * 1000,
           signal: controller.signal,
@@ -6915,7 +6972,10 @@ const main = async () => {
               ? observeProducthuntProfile({target,token:producthuntToken,state:activeWorkerState,signal,checkpoint})
               : scrapeTarget({ target, hosts, signal, checkpoint })
           },
-          prioritize: updateSlack,
+          prioritize: async (state,signal,checkpoint) => {
+            try {await updateSlack(state,signal,checkpoint)}
+            finally {await syncPostDiscovery({state,directory,appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),signal,checkpoint})}
+          },
           deriveTargets: memberCandidates,
           derivationRevision: "member-profile-repos-v3-issues",
           act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), producthuntToken:credential(directory,"producthunt"), accountRevision:accountRevision()}),
