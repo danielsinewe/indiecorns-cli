@@ -57,7 +57,8 @@ export function observationFromSnapshot(task,snapshot,now=Date.now()) {
   return validatePostObservation(task,{status:posts.size||snapshot.emptyVisible?'observed':'unavailable',observedAt:now,posts:[...posts.values()].slice(0,20)},now)
 }
 
-export async function readMemberActivity({browser,task,tab,onState=()=>{},now=Date.now}) {
+export async function readMemberActivity({browser,task,tab,onState=()=>{},now=Date.now,
+  wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),maxReadinessChecks=16}) {
   const expected=profileIdentity(task.platform,task.profileUrl)
   if(!expected||!['linkedin','x'].includes(task.platform))throw new Error('Unsupported member activity task')
   const canonicalCheck=task.platform==='linkedin'?task.profileUrl.replace(/\/$/,'')+'/recent-activity/all/':task.profileUrl
@@ -71,7 +72,14 @@ export async function readMemberActivity({browser,task,tab,onState=()=>{},now=Da
     // A current state check lets the host observe navigation/auth redirects.
     const state=await page.ax.get()
     await onState(state)
-    const snapshot=await page.playwright.evaluate(visibleActivitySnapshot)
+    let snapshot
+    // Navigation can finish before X/LinkedIn hydrate their timelines. Wait only
+    // for rendered cards or an explicit terminal state, within the lease budget.
+    for(let attempt=0;attempt<maxReadinessChecks;attempt++) {
+      snapshot=await page.playwright.evaluate(visibleActivitySnapshot)
+      if(snapshot.activityVisible||snapshot.cards?.length||snapshot.emptyVisible||snapshot.authRequired||snapshot.blocked)break
+      if(attempt+1<maxReadinessChecks)await wait(1000)
+    }
     return observationFromSnapshot(task,snapshot,now())
   } finally {if(owned)await page.close()}
 }
