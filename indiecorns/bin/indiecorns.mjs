@@ -6635,6 +6635,8 @@ const main = async () => {
       const directory = join(configDir, "worker")
       if(args[0]==="power") {
         const action=args[1]??"status",mode=flags.mode??"idle"
+        for(const name of ['enable','accept-power-impact'])if(Object.hasOwn(flags,name)&&flags[name]!==true)
+          throw new Error(`--${name} is an explicit opt-in flag and does not accept a value`)
         if(!['idle','closed-lid'].includes(mode))throw new Error('Use --mode idle or --mode closed-lid')
         let result
         if(action==="helper-package") {
@@ -6651,7 +6653,7 @@ const main = async () => {
           else if(['setup','disable','uninstall'].includes(action)) {
             let worker,startedAt
             if(action==="setup") {
-              if(!flags['accept-power-impact'])throw new Error('Use --enable --accept-power-impact for an explicit system-wide sleep lease')
+              if(flags['accept-power-impact']!==true)throw new Error('Use --enable --accept-power-impact for an explicit system-wide sleep lease')
               worker=workerPowerIdentity({directory})
               if(!worker)throw new Error('A running same-user installed worker is required')
               const identity=spawnSync('/bin/ps',['-p',String(worker.pid),'-o','lstart='],{encoding:'utf8',timeout:5000,env:{PATH:'/usr/bin:/bin',LC_ALL:'C'}})
