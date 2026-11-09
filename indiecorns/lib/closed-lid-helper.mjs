@@ -139,9 +139,17 @@ const safeRootFile=(path,{uid=0,maxSize=16384,write=false}={})=>{
     return fd
   }catch(e){fs.closeSync(fd);throw e}
 }
-function readPrivate(path,options) {
+export function readHelperJSON(path,options) {
   let fd
-  try {fd=safeRootFile(path,options);return JSON.parse(fs.readFileSync(fd,'utf8'))}
+  try {
+    fd=safeRootFile(path,options)
+    // The member can grow its request file after fstat. A fixed-size read keeps
+    // that race from becoming an unbounded allocation in the root process.
+    const limit=options?.maxSize??16384,buffer=Buffer.alloc(limit+1)
+    const bytes=fs.readSync(fd,buffer,0,buffer.length,0)
+    if(bytes>limit)throw new Error('helper_file_too_large')
+    return JSON.parse(buffer.subarray(0,bytes).toString('utf8'))
+  }
   catch(e){if(e.code==='ENOENT')return null;throw e}
   finally{if(fd!==undefined)fs.closeSync(fd)}
 }
@@ -194,9 +202,9 @@ async function privilegedMain() {
   // Stale temporary writes are not journals. The last renamed/fsynced journal
   // remains authoritative after SIGKILL. Directory is root-owned, not writable.
   for(const name of ['journal.json.tmp','status.json.tmp'])fs.rmSync(join(rootDirectory,name),{force:true})
-  const config=readPrivate(join(rootDirectory,'config.json'))
+  const config=readHelperJSON(join(rootDirectory,'config.json'))
   const io=createSystemPowerIO({config,
-    readJournal:()=>readPrivate(join(rootDirectory,'journal.json')),
+    readJournal:()=>readHelperJSON(join(rootDirectory,'journal.json')),
     writeJournal:value=>atomicRootJSON(join(rootDirectory,'journal.json'),value),
     writeStatus:value=>atomicRootJSON(join(rootDirectory,'status.json'),value,0o644),
   })
@@ -211,7 +219,7 @@ async function privilegedMain() {
     if(process.argv[2]==='--uninstall'){controller.stop();return}
     await runPowerWatchdog({controller,shouldStop:()=>stopping,
       readRequest:()=>{
-        const request=readPrivate(join(rootDirectory,'request.json'),{uid:config.uid,maxSize:2048})
+        const request=readHelperJSON(join(rootDirectory,'request.json'),{uid:config.uid,maxSize:2048})
         return request?.nonce===controller.snapshot().lastNonce?null:request
       },
       onRequestError:(request,error)=>{

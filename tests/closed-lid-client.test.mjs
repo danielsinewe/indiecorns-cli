@@ -4,7 +4,8 @@ import * as fs from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {spawnSync} from 'node:child_process'
-import {buildClosedLidPackage,closedLidStatus,requestClosedLid,helperLaunchDaemon,verifyRootRuntime} from '../indiecorns/lib/closed-lid-client.mjs'
+import {buildClosedLidPackage,closedLidStatus,inspectClosedLidStatus,requestClosedLid,helperLaunchDaemon,verifyRootRuntime} from '../indiecorns/lib/closed-lid-client.mjs'
+import {readHelperJSON} from '../indiecorns/lib/closed-lid-helper.mjs'
 
 const uid=process.getuid?.()??1000
 const inspectRuntime=()=>({status:0,stdout:'/node:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n'})
@@ -30,6 +31,14 @@ test('a user-writable dynamic dependency is refused before a runtime can be copi
     assert.throws(()=>verifyRootRuntime('/node',{inspect:()=>({status:0,stdout:'/node:\n\t'+dependency+' (compatibility version 1.0.0)\n'})}),/standalone Node/)
 })
 
+test('status distinguishes a missing helper from an already disabled unattributed system setting',t=>{
+  const directory=fs.mkdtempSync(join(tmpdir(),'indiecorns-power-status-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}))
+  const calls=[]
+  const result=inspectClosedLidStatus({directory,run:(command,args)=>{calls.push([command,args]);return {status:0,stdout:'SleepDisabled 1\n'}}})
+  assert.equal(result.state,'helper_not_installed');assert.equal(result.systemSleepDisabled,1);assert.equal(result.settingAttribution,'unattributed')
+  assert.deepEqual(calls,[['/usr/bin/pmset',['-g']]])
+})
+
 test('client distinguishes queued requests from helper acknowledgement and never replays an uncertain enable',async t=>{
   if(process.platform==='win32')return t.skip('POSIX ownership and no-follow handles')
   const directory=fs.mkdtempSync(join(tmpdir(),'indiecorns-power-client-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}))
@@ -52,4 +61,17 @@ test('source package includes only built-in imports, fixed privileged entry poin
   assert.doesNotMatch(source,/^import .*from ['"](?!node:)/m)
   assert.match(source,/O_NOFOLLOW/);assert.match(source,/BEGIN EXCLUSIVE/)
   assert.match(source,/\['--serve','--uninstall'\]/)
+})
+
+test('privileged reader refuses oversized files, symlinks, hardlinks and writable permissions',t=>{
+  if(process.platform==='win32')return t.skip('POSIX ownership and no-follow handles')
+  const directory=fs.mkdtempSync(join(tmpdir(),'indiecorns-helper-file-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}))
+  const path=join(directory,'request.json'),options={uid,maxSize:2048}
+  fs.writeFileSync(path,'{"version":1}',{mode:0o600})
+  assert.deepEqual(readHelperJSON(path,options),{version:1})
+  fs.linkSync(path,join(directory,'linked'));assert.throws(()=>readHelperJSON(path,options),/unsafe/)
+  fs.unlinkSync(join(directory,'linked'))
+  fs.chmodSync(path,0o622);assert.throws(()=>readHelperJSON(path,options),/unsafe/)
+  fs.chmodSync(path,0o600);fs.writeFileSync(path,' '.repeat(2049));assert.throws(()=>readHelperJSON(path,options),/unsafe/)
+  fs.unlinkSync(path);fs.symlinkSync('/nonexistent-target',path);assert.throws(()=>readHelperJSON(path,options))
 })

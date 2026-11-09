@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {nativeScheduleHandoff,recordNativeRun} from "../lib/native-post-schedule.mjs"
 import {managePower,powerPlan,workerPowerIdentity} from "../lib/worker-power.mjs"
-import {buildClosedLidPackage,closedLidStatus,requestClosedLid} from "../lib/closed-lid-client.mjs"
+import {buildClosedLidPackage,inspectClosedLidStatus,requestClosedLid} from "../lib/closed-lid-client.mjs"
 import {discoveryStatus,discoveryStatusText} from "../lib/post-discovery-status.mjs"
 import {stagePostReport,flushPostReports} from "../lib/post-outbox.mjs"
 import {syncPostDiscovery,discoveryApi,validateReaderConfig} from "../lib/post-discovery.mjs"
@@ -6644,7 +6644,7 @@ const main = async () => {
           result=buildClosedLidPackage({output:flags.output,node:worker.node,cli:worker.cli})
         } else if(mode==="closed-lid") {
           if(osPlatform()!=="darwin")result=powerPlan({mode,minutes:Number(flags.minutes??60)})
-          else if(action==="status")result=closedLidStatus()
+          else if(action==="status")result=inspectClosedLidStatus()
           else if(action==="setup"&&!flags.enable)result={...powerPlan({mode,minutes:Number(flags.minutes??60)}),
             implementation:'packaged_privileged_helper',
             nextCommand:'indiecorns worker power helper-package --output /absolute/new-directory'}

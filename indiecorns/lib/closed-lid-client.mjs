@@ -4,7 +4,7 @@ import {createHash,randomUUID} from 'node:crypto'
 import {fileURLToPath} from 'node:url'
 import {spawnSync} from 'node:child_process'
 import {setTimeout as sleep} from 'node:timers/promises'
-import {rootDirectory,rootLabel,validatePowerRequest} from './closed-lid-helper.mjs'
+import {rootDirectory,rootLabel,validatePowerRequest,parseSleepDisabled} from './closed-lid-helper.mjs'
 
 const quote=value=>"'"+String(value).replace(/'/g,"'\\''")+"'"
 const xml=value=>String(value).replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]))
@@ -27,6 +27,13 @@ export function closedLidStatus({directory=rootDirectory,rootUid=0,now=Date.now(
       closedLidVerified:false,evidence:'Local helper receipt; no hardware or successful browser-discovery claim.'}
   }catch(error){if(error.code==='ENOENT')return {version:1,state:'helper_not_installed',installed:false,requiresAdmin:true,closedLidVerified:false};throw error}
   finally{if(fd!==undefined)fs.closeSync(fd)}
+}
+export function inspectClosedLidStatus(options={}) {
+  const helper=closedLidStatus(options)
+  const run=options.run??((command,args)=>spawnSync(command,args,{encoding:'utf8',timeout:5000,maxBuffer:16384,env:{PATH:'/usr/bin:/bin',LC_ALL:'C'}}))
+  let systemSleepDisabled=null
+  try {const result=run('/usr/bin/pmset',['-g']);if(result.status===0&&!result.error)systemSleepDisabled=parseSleepDisabled(result.stdout??'')}catch{}
+  return {...helper,systemSleepDisabled,settingAttribution:systemSleepDisabled===1?(helper.state==='active'?'helper_lease_reported':'unattributed'):'none_or_unknown'}
 }
 export async function requestClosedLid(op,{minutes=60,pid,startedAt,acceptSystemWide=false,directory=rootDirectory,uid=process.getuid?.(),rootUid=0,now=Date.now,wait=sleep}={}) {
   const request={version:1,op,nonce:randomUUID(),at:now(),...(op==='enable'?{minutes,pid,startedAt,acceptSystemWide}:{})}

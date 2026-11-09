@@ -28,6 +28,8 @@ The CLI and the community worker stay unprivileged. The installer copies the
 existing Node runtime (Node 22.22+ / 24+, including SQLite) and standalone helper
 into root-owned `/Library/Indiecorns/PowerHelper`. It verifies the copied hashes
 before execution. The daemon never executes the user-writable runtime or CLI.
+Packaging inspects the runtime's dynamic dependencies and rejects user-writable
+libraries or rpaths; only macOS system libraries are accepted.
 An existing installation is preserved; replacement requires an explicit uninstall.
 There are no sudoers entries, wildcard commands, networking, model calls or
 external dependencies in the privileged component.
@@ -44,6 +46,9 @@ Only `pmset -a disablesleep 1` and the recorded restore value `0` are privileged
 writes. A known original `SleepDisabled 0` is required; an unknown value or an
 already-disabled system is refused. A root-owned, fsynced journal is persisted
 **before** changing the setting. Enabling twice does not extend a lease.
+Status separately reads the current system setting: a missing/disabled helper
+does not mean system sleep is enabled. A pre-existing `SleepDisabled 1` is
+reported as unattributed and left untouched.
 
 The watchdog checks every second, subject to bounded OS-command latency. Deadline,
 backward clock movement, monotonic timeout, AC loss, worker exit/replacement or an
