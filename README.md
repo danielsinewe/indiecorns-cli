@@ -7,6 +7,10 @@ environments.
 
 ## Install
 
+Optional macOS idle and closed-lid power helpers have separate opt-in, status,
+disable and uninstall paths. Plans and installer packages are inert. See
+[power helper behavior and hardware limits](docs/macos-power.md).
+
 Run the CLI directly with npm:
 
 ```bash
