@@ -30,7 +30,7 @@ const reset = '\x1b[0m'
 const truthy = value => /^(1|true|yes|on)$/i.test(value ?? '')
 
 export function introOptions({command,args=[],flags={},env=process.env,stdout=process.stdout,stdin=process.stdin,agentHost=false}={}) {
-  const entry = command === undefined || ['start','help','wizard','-h'].includes(command) || command==='worker' && args[0]==='setup'
+  const entry = command === undefined || ['start','help','intro','wizard','-h'].includes(command) || command==='worker' && args[0]==='setup'
   const show = Boolean(entry && stdout.isTTY && stdin.isTTY && !agentHost && !env.CI && env.TERM!=='dumb' &&
     !flags.json && !flags.ndjson && !flags.agent && !flags['no-intro'] && !truthy(env.INDIECORNS_NO_INTRO))
   const color = !Object.hasOwn(env,'NO_COLOR') && env.TERM!=='dumb'
@@ -42,11 +42,12 @@ export function introFrame({color=true,compact=false,phase=2,version=''}={}) {
   if(compact || !color) return `\n  /\u005c  Indiecorns${version ? '  v'+version : ''}\n <  '> Build together. Go further.\n  \/\n\n`
   const captions = {3:`\x1b[1mIndiecorns${reset}`,4:'Build together. Go further.',6:`\x1b[2mCommunity CLI${version?' / v'+version:''}${reset}`}
   const lines=[]
+  const paint=(cell,x)=>palette[cell]&&'cpy'.includes(cell)&&phase<2&&x>phase*8?palette.g:palette[cell]
   for(let y=0;y<pixels.length;y+=2) {
     let row='  '
     for(let x=0;x<23;x++) {
       const upper=pixels[y][x],lower=pixels[y+1]?.[x]??' '
-      const fg=palette[upper],bg=palette[lower]
+      const fg=paint(upper,x),bg=paint(lower,x)
       row+=reset+(fg?`\x1b[38;2;${fg}m`:'')+(bg?`\x1b[48;2;${bg}m`:'')+(fg?'▀':bg?'▄':' ')
       // For a bottom-only pixel, its foreground must be the bottom colour.
       if(!fg && bg) row=row.slice(0,-1)+`\x1b[38;2;${bg}m\x1b[49m▄`

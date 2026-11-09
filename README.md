@@ -6,7 +6,8 @@ plans, and install the local Indiecorns plugin for Codex and compatible agent
 environments.
 
 Interactive startup shows the Indiecorns pixel unicorn with a short 160 ms
-sparkle. Use `--no-intro` (or `INDIECORNS_NO_INTRO=1`) to skip it,
+color reveal. Preview it with `indiecorns intro`. Use `--no-intro` (or
+`INDIECORNS_NO_INTRO=1`) to skip it,
 `--no-animation` (or `INDIECORNS_REDUCED_MOTION=1` / `REDUCE_MOTION=1`) for a
 static mark, and `NO_COLOR` for plain text. Narrow terminals use a compact mark.
 Pipes, `TERM=dumb`, CI, worker daemons, agent hosts and `--json`, `--ndjson` or

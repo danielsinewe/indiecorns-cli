@@ -131,6 +131,7 @@ Commands:
   login                          Reconnect this CLI to your Indiecorns account
   signup                         Create an Indiecorns account in your browser
   status                         Show CLI authentication status
+  intro                          Preview the interactive Indiecorns terminal mark
   tasks                          Show the next setup step
   follow <task>                  Open an onboarding link
   follow-members [platform]      Open Indiecorns member profiles to follow
@@ -7347,6 +7348,10 @@ const main = async () => {
     case "--help":
     case "-h":
       console.log(usage)
+      return 0
+    case "intro":
+      if(flags.ndjson)printNdjson({type:'cli.intro',brand:'Indiecorns',animated:false})
+      else if(flags.json||flags.agent)printJson({version:1,brand:'Indiecorns',animated:false})
       return 0
     case undefined:
       return isCodexHost() ? runCodexHandoff(flags) : runOnboarding(flags)
