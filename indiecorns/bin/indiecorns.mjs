@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {nativeScheduleHandoff,recordNativeRun} from "../lib/native-post-schedule.mjs"
+import {showTerminalIntro} from "../lib/terminal-intro.mjs"
 import {discoveryStatus,discoveryStatusText} from "../lib/post-discovery-status.mjs"
 import {stagePostReport,flushPostReports} from "../lib/post-outbox.mjs"
 import {syncPostDiscovery,discoveryApi,validateReaderConfig} from "../lib/post-discovery.mjs"
@@ -130,6 +131,7 @@ Commands:
   login                          Reconnect this CLI to your Indiecorns account
   signup                         Create an Indiecorns account in your browser
   status                         Show CLI authentication status
+  intro                          Preview the interactive Indiecorns terminal mark
   tasks                          Show the next setup step
   follow <task>                  Open an onboarding link
   follow-members [platform]      Open Indiecorns member profiles to follow
@@ -6624,6 +6626,8 @@ const main = async () => {
   const { command, args, flags: parsedFlags } = parseArgs(process.argv.slice(2))
   const flags = applyAgentMode(parsedFlags)
 
+  await showTerminalIntro({command,args,flags,agentHost:isCodexHost(),version:getCliVersion()})
+
   switch (command) {
     case "worker": {
       const directory = join(configDir, "worker")
@@ -7344,6 +7348,10 @@ const main = async () => {
     case "--help":
     case "-h":
       console.log(usage)
+      return 0
+    case "intro":
+      if(flags.ndjson)printNdjson({type:'cli.intro',brand:'Indiecorns',animated:false})
+      else if(flags.json||flags.agent)printJson({version:1,brand:'Indiecorns',animated:false})
       return 0
     case undefined:
       return isCodexHost() ? runCodexHandoff(flags) : runOnboarding(flags)
