@@ -29,6 +29,7 @@
 	},
 	"files": [
 		"CHANGELOG.md",
+		"docs/macos-power.md",
 		"indiecorns/bin/indiecorns.mjs",
 		"plugins/indiecorns",
 		".agents/plugins/marketplace.json",

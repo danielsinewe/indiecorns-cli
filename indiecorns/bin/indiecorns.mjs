@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import {nativeScheduleHandoff,recordNativeRun} from "../lib/native-post-schedule.mjs"
+import {managePower,powerPlan,workerPowerIdentity} from "../lib/worker-power.mjs"
+import {buildClosedLidPackage,closedLidStatus,requestClosedLid} from "../lib/closed-lid-client.mjs"
 import {discoveryStatus,discoveryStatusText} from "../lib/post-discovery-status.mjs"
 import {stagePostReport,flushPostReports} from "../lib/post-outbox.mjs"
 import {syncPostDiscovery,discoveryApi,validateReaderConfig} from "../lib/post-discovery.mjs"
@@ -143,6 +145,10 @@ Commands:
   worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
+  worker power setup            Preview optional macOS power modes (no changes)
+  worker power status           Inspect the optional power helper
+  worker power disable          Stop the optional power session
+  worker power helper-package --output <dir>  Prepare reviewed closed-lid installer
   worker discovery status        Inspect post sources, delivery and reader requirements
   worker discovery agent         Get the bundled reader for your active agent session
   worker discovery schedule      Prepare a native host schedule (--interval-minutes 60)
@@ -6627,6 +6633,39 @@ const main = async () => {
   switch (command) {
     case "worker": {
       const directory = join(configDir, "worker")
+      if(args[0]==="power") {
+        const action=args[1]??"status",mode=flags.mode??"idle"
+        if(!['idle','closed-lid'].includes(mode))throw new Error('Use --mode idle or --mode closed-lid')
+        let result
+        if(action==="helper-package") {
+          if(typeof flags.output!=="string")throw new Error('Use --output with a new absolute package directory')
+          const worker=workerPowerIdentity({directory})
+          if(!worker)throw new Error('A running same-user installed worker is required; packaging does not start it')
+          result=buildClosedLidPackage({output:flags.output,node:worker.node,cli:worker.cli})
+        } else if(mode==="closed-lid") {
+          if(osPlatform()!=="darwin")result=powerPlan({mode,minutes:Number(flags.minutes??60)})
+          else if(action==="status")result=closedLidStatus()
+          else if(action==="setup"&&!flags.enable)result={...powerPlan({mode,minutes:Number(flags.minutes??60)}),
+            implementation:'packaged_privileged_helper',
+            nextCommand:'indiecorns worker power helper-package --output /absolute/new-directory'}
+          else if(['setup','disable','uninstall'].includes(action)) {
+            let worker,startedAt
+            if(action==="setup") {
+              if(!flags['accept-power-impact'])throw new Error('Use --enable --accept-power-impact for an explicit system-wide sleep lease')
+              worker=workerPowerIdentity({directory})
+              if(!worker)throw new Error('A running same-user installed worker is required')
+              const identity=spawnSync('/bin/ps',['-p',String(worker.pid),'-o','lstart='],{encoding:'utf8',timeout:5000,env:{PATH:'/usr/bin:/bin',LC_ALL:'C'}})
+              if(identity.status!==0)throw new Error('Worker start time could not be verified')
+              startedAt=identity.stdout.trim()
+            }
+            result=await requestClosedLid(action==='setup'?'enable':action,{minutes:Number(flags.minutes??60),pid:worker?.pid,startedAt,acceptSystemWide:Boolean(flags['accept-power-impact'])})
+            if(action==='uninstall')result.nextStep='After acknowledged release, run the reviewed uninstall.sh with administrator authorization. No privileged files are removed by this unprivileged command.'
+          }else throw new Error('Use worker power setup, status, disable, uninstall or helper-package')
+        }else result=managePower(action,{mode,minutes:Number(flags.minutes??60),enable:Boolean(flags.enable),acceptPowerImpact:Boolean(flags['accept-power-impact'])})
+        if(flags.ndjson)printNdjson({type:'worker.power.result',...result})
+        else printJson(result)
+        return result.acknowledged===false||result.accepted===false?1:0
+      }
       const registrationFile=join(directory,"service-runtime.json")
       const previousVersion=flags["previous-version"]??(existsSync(registrationFile)?JSON.parse(readFileSync(registrationFile,"utf8")).previousVersion:null)
       const workerHeaderAliases=()=>previousVersion&&getCliAuthHeaders()?[{...getCliAuthHeaders(),"x-indiecorns-cli-version":previousVersion}]:[]
