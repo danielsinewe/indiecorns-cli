@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {nativeScheduleHandoff,recordNativeRun} from "../lib/native-post-schedule.mjs"
+import {showTerminalIntro} from "../lib/terminal-intro.mjs"
 import {discoveryStatus,discoveryStatusText} from "../lib/post-discovery-status.mjs"
 import {stagePostReport,flushPostReports} from "../lib/post-outbox.mjs"
 import {syncPostDiscovery,discoveryApi,validateReaderConfig} from "../lib/post-discovery.mjs"
@@ -6623,6 +6624,8 @@ const runCodexHandoff = async (flags) => {
 const main = async () => {
   const { command, args, flags: parsedFlags } = parseArgs(process.argv.slice(2))
   const flags = applyAgentMode(parsedFlags)
+
+  await showTerminalIntro({command,args,flags,agentHost:isCodexHost(),version:getCliVersion()})
 
   switch (command) {
     case "worker": {
