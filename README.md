@@ -52,6 +52,34 @@ the CLI stores it in `~/.indiecorns/config.json` with user-only permissions and
 never prints it. On a remote machine or in automation, pass `--no-open` to
 print the login URL without launching a browser.
 
+## Herd campaigns
+
+Campaign commands use the browser sign-in saved by `indiecorns login` and read
+current data from Herd. If needed, sign in and run `indiecorns status` to finish
+connecting the CLI. Use `--json --no-telemetry` for automation.
+
+```bash
+npx indiecorns campaign list --json --no-telemetry
+npx indiecorns campaign recommendations --json --no-telemetry
+npx indiecorns campaign summary --json --no-telemetry
+npx indiecorns campaign preferences --json --no-telemetry
+npx indiecorns campaign create --file campaign.json --json --no-telemetry
+npx indiecorns campaign cancel <campaign-id> --json --no-telemetry
+npx indiecorns campaign preferences --file preferences.json --json --no-telemetry
+```
+
+For creation, supply your own `title`, `description`, `productUrl`, `audience`,
+`language` (such as `en`), `topics` array, and an explicit
+`allowPublicSpotlight` boolean. You can also supply `links`, `startsAt`,
+and `expiresAt`. Set a stable UUID as the `clientEventId` for this update and reuse the
+same ID and document when retrying after you check the current campaign list.
+Setting `allowPublicSpotlight` to true permits an Indiecorns public placement.
+
+A preferences document can include `topics`, `languages`, `audiences`,
+`mutedTopics`, `paused`, `digestEnabled`, `quietHours`, `productName`, and
+`productUrl`. Supply only the values you want to change. Both document-based commands also accept `--stdin` in place of
+`--file`. Campaign commands do not perform social actions.
+
 ## Agent Workflows
 
 Use the structured JSON interfaces when another agent is orchestrating the CLI:

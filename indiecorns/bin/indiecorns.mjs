@@ -38,6 +38,7 @@ import { setupStepText, setupSummary, healthText } from "../lib/worker-ui.mjs"
 import { workerEvidenceHeader, reportWorkerInstallation } from "../lib/installation-evidence.mjs"
 import {storageSettings,directoryBytes} from "../lib/storage.mjs"
 import {credentialRevision} from "../lib/auth-context.mjs"
+import {runCampaign} from "../lib/campaigns.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -130,6 +131,12 @@ Commands:
   login                          Reconnect this CLI to your Indiecorns account
   signup                         Create an Indiecorns account in your browser
   status                         Show CLI authentication status
+  campaign list                  Read campaigns for your account
+  campaign recommendations       Read campaigns matched to your preferences
+  campaign summary               Read campaign results for your account
+  campaign create --file <path>  Submit your campaign (or use --stdin)
+  campaign cancel <id>           Cancel your campaign
+  campaign preferences           Read preferences (set with --file or --stdin)
   tasks                          Show the next setup step
   follow <task>                  Open an onboarding link
   follow-members [platform]      Open Indiecorns member profiles to follow
@@ -1303,16 +1310,7 @@ const getCliEndpoint = (modernPath, legacyPath) =>
 const normalizeCliActionId = (id) =>
   id === "cli_install" ? CLI_INSTALL_ACTION_ID : id
 
-const getCliAuthHeaders = () => {
-  const accessToken = getCliAccessToken()
-  if (accessToken) {
-    return {
-      Authorization: `Bearer ${accessToken}`,
-      "x-indiecorns-cli-version": getCliVersion(),
-    }
-  }
-
-  const session = readConfig().browserSession
+const getBrowserSessionHeaders = (session) => {
   if (!session?.cliSessionId || !session?.cliSecret) {
     return null
   }
@@ -1325,6 +1323,18 @@ const getCliAuthHeaders = () => {
     "x-indiecorns-platform": osPlatform(),
     "x-indiecorns-architecture": osArch(),
   }
+}
+
+const getCliAuthHeaders = () => {
+  const accessToken = getCliAccessToken()
+  if (accessToken) {
+    return {
+      Authorization: `Bearer ${accessToken}`,
+      "x-indiecorns-cli-version": getCliVersion(),
+    }
+  }
+
+  return getBrowserSessionHeaders(readConfig().browserSession)
 }
 
 const getAgentPlanFromApp = async (flags) => {
@@ -6625,6 +6635,24 @@ const main = async () => {
   const flags = applyAgentMode(parsedFlags)
 
   switch (command) {
+    case "campaign": {
+      const storedSession = readConfig().browserSession
+      try {
+        if (process.env.INDIECORNS_TOKEN?.trim()) {
+          throw new Error("Campaigns use the CLI browser sign-in. Unset INDIECORNS_TOKEN before using this command.")
+        }
+        printJson(await runCampaign({
+          args, flags, appUrl: getAppUrl(flags),
+          sessionOrigin: storedSession?.appUrl ?? DEFAULT_APP_URL,
+          headers: getBrowserSessionHeaders(storedSession),
+        }))
+        return 0
+      } catch (error) {
+        if (flags.json) console.error(JSON.stringify({ error: error.message }))
+        else console.error(fail(error.message))
+        return 1
+      }
+    }
     case "worker": {
       const directory = join(configDir, "worker")
       const registrationFile=join(directory,"service-runtime.json")
@@ -7362,7 +7390,7 @@ const parsedForTelemetry = parseArgs(process.argv.slice(2))
 const telemetryCommand = parsedForTelemetry.command ?? "start"
 const telemetryFlags = parsedForTelemetry.flags
 const telemetryArgs = parsedForTelemetry.args
-const shouldTrackCommand = !["telemetry", "analytics"].includes(
+const shouldTrackCommand = !["telemetry", "analytics", "campaign"].includes(
   telemetryCommand
 )
 

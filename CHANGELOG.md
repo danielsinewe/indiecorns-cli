@@ -1,3 +1,8 @@
+# 0.5.3
+
+- Add account-bound Herd campaign commands for recommendations, original campaign submissions, preferences, cancellation and recorded results. Reuse the website's browser sign-in and stable request IDs; never retry uncertain writes automatically.
+- Keep campaign data fresh across accounts and reject credential overrides and redirected requests. Campaign content and public Spotlight permission come from the member's explicit JSON input.
+
 # 0.5.2
 
 - Wait for rendered X and LinkedIn timelines before classifying source availability. Keep the wait bounded and preserve login requirements, author matching and temporary-tab cleanup.
