@@ -48,9 +48,7 @@ npm run cli -- follow x --no-open
 npm run cli -- follow linkedin --no-open
 npm run cli -- follow peerlist --no-open
 npm run cli -- follow-members all --agent
-npm run cli -- upvote peerlist --no-open
-npm run cli -- upvote-members peerlist --agent
-npm run cli -- rate peerlist --agent
+npm run cli -- worker support --json --no-telemetry
 npm run cli -- peerlist-launches --agent
 npm run cli -- indiehackers fill-profile --agent
 npm run cli -- extension install --no-open
@@ -72,9 +70,7 @@ npx indiecorns follow x --no-open
 npx indiecorns follow linkedin --no-open
 npx indiecorns follow peerlist --no-open
 npx indiecorns follow-members all --agent
-npx indiecorns upvote peerlist --no-open
-npx indiecorns upvote-members peerlist --agent
-npx indiecorns rate peerlist --agent
+npx indiecorns worker support --json --no-telemetry
 npx indiecorns peerlist-launches --agent
 npx indiecorns indiehackers fill-profile --agent
 npx indiecorns extension install --no-open
@@ -141,19 +137,26 @@ platform provides a token.
 - Use `npx indiecorns follow-members all --agent` to retrieve Indiecorns member
   follow targets for Peerlist, X, and Product Hunt. Follow the external profile
   in the signed-in browser before running the target's `recordCommand`.
-- Use `npx indiecorns peerlist-launches --agent` for the Monday Peerlist launch
-  queue. It returns project upvote and 5-star rating targets for Indiecorns
-  launches, plus after-proof record commands. Only run those commands after the
-  upvote and rating are visibly complete in a signed-in Peerlist browser.
+- Use `npx indiecorns worker support --json --no-telemetry` to read current
+  launch requests. For a linkless request, show that the requester needs to
+  supply an exact launch link. For a linked request, offer independent review
+  and genuine first-hand feedback. Use `npx indiecorns peerlist-launches --agent`
+  separately to list known launches for independent review.
 - Use `npx indiecorns indiehackers fill-profile --agent` to get the current
   Indie Hackers profile fill plan. Browser automation may prefill
   `https://www.indiehackers.com/danielsinewe/editing`, but the user must review
   and save the form manually.
-- Treat social actions as external-platform actions. Agents may open the X,
-  Product Hunt, and Peerlist URLs and click Follow, Upvote, or accept the company
-  invitation when the user is already signed in, then record proof with
-  `npx indiecorns record peerlist --target <username>` or run the completion
-  command after the external action was actually performed.
+- Treat a launch request as information for the signed-in member to review.
+  An inbox entry describes whether it has a usable launch link. A member can
+  separately opt into original sharing with `worker support configure` using
+  their own Buffer destination and public text template. Use `worker support
+  destinations` to read eligible connected channels; do not guess IDs, choose
+  a destination, supply consent or configure sharing on behalf of a member.
+  Only explicit requests to share with an exact link can trigger a post. Use
+  one worker per destination because receipts and duplicate checks are local.
+  `worker support pause` and collect mode stop new submissions. Buffer may still
+  publish posts it has already accepted. Treat a post as sent after verified
+  provider readback.
 
 ## Expected Agent Plan Shape
 

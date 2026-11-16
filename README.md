@@ -52,6 +52,34 @@ the CLI stores it in `~/.indiecorns/config.json` with user-only permissions and
 never prints it. On a remote machine or in automation, pass `--no-open` to
 print the login URL without launching a browser.
 
+## Herd campaigns
+
+Campaign commands use the browser sign-in saved by `indiecorns login` and read
+current data from Herd. If needed, sign in and run `indiecorns status` to finish
+connecting the CLI. Use `--json --no-telemetry` for automation.
+
+```bash
+npx indiecorns campaign list --json --no-telemetry
+npx indiecorns campaign recommendations --json --no-telemetry
+npx indiecorns campaign summary --json --no-telemetry
+npx indiecorns campaign preferences --json --no-telemetry
+npx indiecorns campaign create --file campaign.json --json --no-telemetry
+npx indiecorns campaign cancel <campaign-id> --json --no-telemetry
+npx indiecorns campaign preferences --file preferences.json --json --no-telemetry
+```
+
+For creation, supply your own `title`, `description`, `productUrl`, `audience`,
+`language` (such as `en`), `topics` array, and an explicit
+`allowPublicSpotlight` boolean. You can also supply `links`, `startsAt`,
+and `expiresAt`. Set a stable UUID as the `clientEventId` for this update and reuse the
+same ID and document when retrying after you check the current campaign list.
+Setting `allowPublicSpotlight` to true permits an Indiecorns public placement.
+
+A preferences document can include `topics`, `languages`, `audiences`,
+`mutedTopics`, `paused`, `digestEnabled`, `quietHours`, `productName`, and
+`productUrl`. Supply only the values you want to change. Both document-based commands also accept `--stdin` in place of
+`--file`. Campaign commands do not perform social actions.
+
 ## Agent Workflows
 
 Use the structured JSON interfaces when another agent is orchestrating the CLI:
@@ -89,8 +117,7 @@ The CLI can open or record the current Indiecorns onboarding actions:
 npx indiecorns follow x
 npx indiecorns follow linkedin
 npx indiecorns follow peerlist
-npx indiecorns upvote peerlist
-npx indiecorns rate peerlist
+npx indiecorns worker support --json --no-telemetry
 npx indiecorns peerlist-launches --agent
 npx indiecorns join peerlist
 npx indiecorns join slack
@@ -116,10 +143,65 @@ experience.
 Peerlist, X, and Product Hunt. Use `--agent` or `--json` to get structured
 targets and matching `record` commands without opening browser tabs.
 
-`peerlist-launches` is the Monday community-support queue for Peerlist project
-launches. It returns upvote and 5-star rating record commands, but those
-commands should only run after the launch actions are visibly completed in a
-signed-in browser.
+The background worker automatically reads launch requests through the
+Indiecorns community feed. Use `worker support --json` for the current account's
+inbox. It shows when an exact launch link is missing and reports automatic
+sharing separately from requests.
+
+After upgrading, the existing feed polling schedule catches up on the last seven
+days of requests once. The inbox retains at most 200 recent requests, expires
+each request after seven days, and hides results when current membership cannot
+be verified. Existing polling intervals, action queues, and receipts are preserved.
+
+`peerlist-launches --agent` lists known Peerlist launches separately for
+independent review without opening a browser.
+
+### Automatic launch sharing
+
+Automatic sharing is off until a member enables it from their own signed-in
+CLI. Connect a Buffer API key and list the eligible destinations:
+
+```bash
+indiecorns worker credentials --provider buffer --token-stdin < /secure/path/buffer-token
+indiecorns worker support destinations --json
+```
+
+Copy the returned account and destination IDs into a settings file. Choose which
+launch platforms to share and write the public message in your own words:
+
+```json
+{
+  "enabled": true,
+  "provider": "buffer",
+  "accountId": "<Buffer account ID>",
+  "organizationId": "<Buffer organization ID>",
+  "channelId": "<Buffer channel ID>",
+  "serviceId": "<connected social account ID>",
+  "platforms": ["peerlist", "producthunt"],
+  "textTemplate": "A launch from the Indiecorns community: {url}"
+}
+```
+
+```bash
+indiecorns worker support configure --file sharing.json
+indiecorns worker support --json
+indiecorns worker support pause
+```
+
+The worker submits a new post when a current member explicitly asks for sharing
+and supplies the exact public launch link. It inserts that link into the
+template, waits at least an hour between shares, and uses the existing daily
+action limit. A request to vote alone or an instruction against sharing does
+not trigger a post. Only requests made after you enable sharing are eligible.
+
+The CLI reports sent posts, pending provider results, failures and uncertain
+submissions. Use one worker per destination because receipts and duplicate
+checks are local to each worker. `worker support pause` and collect mode stop
+new submissions. Posts already sent to Buffer may still publish.
+
+Sharing settings belong to the signed-in member and exact Buffer destination.
+They do not enable voting, ratings, likes, comments, native reposts, or any
+other worker actions. The CLI does not copy Slack message text into a post.
 
 ## External Profiles
 
