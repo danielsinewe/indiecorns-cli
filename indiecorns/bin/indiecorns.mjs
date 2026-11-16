@@ -39,6 +39,7 @@ import { workerEvidenceHeader, reportWorkerInstallation } from "../lib/installat
 import {storageSettings,directoryBytes} from "../lib/storage.mjs"
 import {credentialRevision} from "../lib/auth-context.mjs"
 import {runCampaign} from "../lib/campaigns.mjs"
+import {supportInboxReport} from "../lib/support-inbox.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -149,6 +150,7 @@ Commands:
   worker setup --json            Machine-readable result (--ndjson for events)
   worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
+  worker support                 Read launch requests from your community inbox
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
   worker discovery status        Inspect post sources, delivery and reader requirements
   worker discovery agent         Get the bundled reader for your active agent session
@@ -163,7 +165,7 @@ Commands:
   community-next [platform]      Show the next community action target
   community-plan [platform]      Print a read-only multi-action community plan
   community-status               Summarize community targets, records, and reporting
-  peerlist-launches              Monday Peerlist launch upvote + 5-star rating queue
+  peerlist-launches              Read Peerlist launch requests for independent review
   indiehackers fill-profile      Prefill the Indie Hackers profile edit form
   join slack                     Open the Indiecorns Slack invite
   record <platform> --target <u> Record an external action event
@@ -1638,8 +1640,6 @@ const normalizeAgentPlanForCli = ({ plan, flags, fallback }) => {
         "npx indiecorns post list all --agent",
         "npx indiecorns launch set producthunt --url <url> --name <name>",
         "npx indiecorns launch list all --agent",
-        "npx indiecorns upvote-members peerlist --agent",
-        "npx indiecorns rate peerlist --agent",
         "npx indiecorns upvote-members producthunt --agent",
       ])
     ),
@@ -5139,6 +5139,37 @@ const runCommunityNext = async (flags, args = []) => {
   return 0
 }
 
+const workerSlackMode = (directory) => {
+  const settings = join(directory, "slack-settings.json")
+  const mode = existsSync(settings) ? JSON.parse(readFileSync(settings, "utf8")).source : "auto"
+  if (!["auto", "community", "local"].includes(mode)) throw new Error("Invalid Slack source")
+  return mode
+}
+
+const usesCommunitySlack = (mode, token, snapshot) =>
+  mode === "community" || (mode === "auto" && (!token || !snapshot))
+
+const workerSupportContext = (flags, headers = getCliAuthHeaders()) => {
+  const appUrl = getAppUrl(flags)
+  const explicitToken = process.env.INDIECORNS_TOKEN?.trim()
+  const session = readConfig().browserSession
+  return {
+    appUrl,
+    headers,
+    originMatches: Boolean(explicitToken) ||
+      new URL(session?.appUrl ?? DEFAULT_APP_URL).origin === new URL(appUrl).origin,
+    expectedActorId: explicitToken ? undefined : session?.userId,
+  }
+}
+
+const workerSupport = (flags, { directory = join(configDir, "worker"), inbox, platform, includeRequests = true } = {}) => {
+  const mode = workerSlackMode(directory)
+  const sourceAvailable = usesCommunitySlack(
+    mode, mode === "community" ? null : credential(directory, "slack"), existsSync(join(directory, "slack-evidence.json"))
+  )
+  return supportInboxReport(inbox, { ...workerSupportContext(flags), sourceAvailable, platform, includeRequests })
+}
+
 const isMonday = (date = new Date()) => date.getDay() === 1
 
 const getNextMondayIsoDate = (date = new Date()) => {
@@ -5240,7 +5271,7 @@ const runPeerlistLaunches = async (flags) => {
   const targets = getCommunityQueueTargetsFromSnapshot(
     { actions },
     targetLimit ? targetLimit * 2 : Number.POSITIVE_INFINITY
-  )
+  ).map(({ recordCommand, ...target }) => target)
   const uniqueLaunches = Array.from(
     new Map(
       targets.map((target) => [
@@ -5260,7 +5291,6 @@ const runPeerlistLaunches = async (flags) => {
     due: true,
     platform: "peerlist",
     targetSource: "projects",
-    rating: 5,
     count: targets.length,
     launchCount: uniqueLaunches.length,
     targets,
@@ -5276,18 +5306,15 @@ const runPeerlistLaunches = async (flags) => {
     setupCommands: Array.from(
       new Set(actions.flatMap((action) => action.setupCommands ?? []))
     ),
-    afterProofCommands: targets
-      .map((target) => target.recordCommand)
-      .filter(Boolean),
+    automaticExternalActions: false,
+    afterProofCommands: [],
     nextCommands: [
       `npx indiecorns peerlist-launches --agent --app-url ${getAppUrl(flags)}`,
-      `npx indiecorns community-queue peerlist --type upvote --target-source projects --agent --app-url ${getAppUrl(flags)}`,
-      `npx indiecorns community-queue peerlist --type rate --target-source projects --agent --app-url ${getAppUrl(flags)}`,
+      `npx indiecorns worker support --json --app-url ${getAppUrl(flags)}`,
       `npx indiecorns events --agent --platform peerlist --app-url ${getAppUrl(flags)}`,
     ],
-    reporting: getCommunityReportingInfo(flags),
-    reminder:
-      "Open each Peerlist launch, upvote it, submit a genuine 5-star rating, then run each record command only after both actions are visibly complete.",
+    reporting: { ...getCommunityReportingInfo(flags), evidence: "self_reported" },
+    reminder: "Review any launches that interest you independently. If you try a launch, offer genuine first-hand feedback.",
   }
 
   if (flags.json || flags.agent) {
@@ -5308,19 +5335,13 @@ const runPeerlistLaunches = async (flags) => {
     return 0
   }
 
-  console.log(color("Monday Peerlist launch support", colors.cyan))
+  console.log(color("Peerlist launches for independent review", colors.cyan))
   for (const launch of uniqueLaunches) {
     console.log(`${ok("launch")} ${launch.targetLabel}`)
     console.log(`  ${launch.targetUrl}`)
     if (!flags["no-open"]) {
       openUrl(launch.targetUrl)
     }
-  }
-  console.log("")
-  for (const target of targets) {
-    console.log(
-      `  after ${target.eventType}${target.eventType === "rate" ? " 5-star" : ""}: ${dim(target.recordCommand)}`
-    )
   }
   console.log("")
   console.log(dim(output.reminder))
@@ -6399,8 +6420,6 @@ const getWizardReport = async (flags) => {
       listCommunityPosts: `npx indiecorns post list all --agent --app-url ${appUrl}`,
       listCommunityLaunches: `npx indiecorns launch list all --agent --app-url ${appUrl}`,
       peerlistLaunches: `npx indiecorns peerlist-launches --agent --app-url ${appUrl}`,
-      upvotePeerlistMembers: `npx indiecorns upvote-members peerlist --agent --app-url ${appUrl}`,
-      ratePeerlistLaunches: `npx indiecorns rate peerlist --agent --app-url ${appUrl}`,
       upvoteProductHuntMembers: `npx indiecorns upvote-members producthunt --agent --app-url ${appUrl}`,
       pluginInstall: "npx indiecorns plugin install",
     },
@@ -6662,24 +6681,22 @@ const main = async () => {
       const slackSettingsPath = join(directory, "slack-settings.json")
       let memberSnapshot = null
       let activeWorkerState = null
-      const slackMode = () => {
-        const mode = existsSync(slackSettingsPath) ? JSON.parse(readFileSync(slackSettingsPath,"utf8")).source : "auto"
-        if (!["auto","community","local"].includes(mode)) throw new Error("Invalid Slack source")
-        return mode
-      }
+      const slackMode = () => workerSlackMode(directory)
       const updateSlack = async (state, signal, checkpoint) => {
         activeWorkerState = state
         memberSnapshot = null
         let snapshot = existsSync(slackPath) ? validateSlackEvidence(JSON.parse(readFileSync(slackPath, "utf8"))) : null
         const mode = slackMode()
         const localToken = mode === "community" ? null : credential(directory, "slack")
-        const useCommunity = mode === "community" || (mode === "auto" && (!localToken || !snapshot))
+        const useCommunity = usesCommunitySlack(mode, localToken, snapshot)
         const token = useCommunity ? null : localToken
         if (useCommunity) {
           const headers=getCliAuthHeaders()
           const proof=workerEvidenceHeader(directory,{headers,version:getCliVersion()})
+          const supportContext=workerSupportContext(flags,headers)
           snapshot = await syncCommunityFeed({state,signal,checkpoint,appUrl:getAppUrl(flags),
-            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:proof?{...headers,"x-indiecorns-worker-evidence":proof}:headers,headerAliases:workerHeaderAliases()})
+            endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:proof?{...headers,"x-indiecorns-worker-evidence":proof}:headers,headerAliases:workerHeaderAliases(),
+            enableSupport:supportContext.originMatches,expectedActorId:supportContext.expectedActorId})
           state.slackSource = "community_feed"
         } else state.slackSource = "local_slack"
         if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
@@ -6980,8 +6997,21 @@ const main = async () => {
         } else printJson(await discoveryApi({appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),body}))
         return 0
       }
+      if (args[0] === "support") {
+        const allowed = new Set(["agent", "app-url", "json", "no-open", "no-telemetry"])
+        if (args.length !== 1 || Object.keys(flags).some(flag => !allowed.has(flag))) {
+          throw new Error("Use worker support --json with the signed-in CLI account")
+        }
+        const { state } = workerStatus(directory)
+        printJson(workerSupport(flags, { directory, inbox: state?.supportInbox }))
+        return 0
+      }
       if (args[0] === "status") {
-        printJson(workerStatus(directory))
+        const status = workerStatus(directory)
+        const inbox = status.state?.supportInbox
+        if (status.state) delete status.state.supportInbox
+        if (status.state?.communityFeed) delete status.state.communityFeed.supportCatchup
+        printJson({ ...status, support: workerSupport(flags, { directory, inbox, includeRequests: false }) })
         return 0
       }
       if (args[0] === "health") {

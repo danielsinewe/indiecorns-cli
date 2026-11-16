@@ -117,8 +117,7 @@ The CLI can open or record the current Indiecorns onboarding actions:
 npx indiecorns follow x
 npx indiecorns follow linkedin
 npx indiecorns follow peerlist
-npx indiecorns upvote peerlist
-npx indiecorns rate peerlist
+npx indiecorns worker support --json --no-telemetry
 npx indiecorns peerlist-launches --agent
 npx indiecorns join peerlist
 npx indiecorns join slack
@@ -144,10 +143,19 @@ experience.
 Peerlist, X, and Product Hunt. Use `--agent` or `--json` to get structured
 targets and matching `record` commands without opening browser tabs.
 
-`peerlist-launches` is the Monday community-support queue for Peerlist project
-launches. It returns upvote and 5-star rating record commands, but those
-commands should only run after the launch actions are visibly completed in a
-signed-in browser.
+The background worker automatically reads launch requests through the
+Indiecorns community feed. Use `worker support --json` for the current account's
+inbox. The inbox shows when an exact launch link is missing. Linked launches are available for
+independent review and first-hand feedback. The inbox never performs an
+external action.
+
+After upgrading, the existing feed polling schedule catches up on the last seven
+days of requests once. The inbox retains at most 200 recent requests, expires
+each request after seven days, and hides results when current membership cannot
+be verified. Existing polling intervals, action queues, and receipts are preserved.
+
+`peerlist-launches --agent` lists known Peerlist launches separately for
+independent review without opening a browser.
 
 ## External Profiles
 

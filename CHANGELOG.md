@@ -1,5 +1,7 @@
 # 0.5.3
 
+- Collect recent Slack launch requests automatically during existing community feed checks. Add an account-bound `worker support` inbox, explicit missing-link states, and a one-time seven-day catch-up without changing polling intervals or performing external actions.
+- Keep launch requests separate from completed actions and replace fixed Peerlist rating instructions with independent review guidance.
 - Add account-bound Herd campaign commands for recommendations, original campaign submissions, preferences, cancellation and recorded results. Reuse the website's browser sign-in and stable request IDs; never retry uncertain writes automatically.
 - Keep campaign data fresh across accounts and reject credential overrides and redirected requests. Campaign content and public Spotlight permission come from the member's explicit JSON input.
 
