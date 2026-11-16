@@ -147,9 +147,16 @@ platform provides a token.
   `https://www.indiehackers.com/danielsinewe/editing`, but the user must review
   and save the form manually.
 - Treat a launch request as information for the signed-in member to review.
-  Any decision to vote, rate, share, or leave feedback belongs to that member.
-  An inbox entry records a request, and its status describes whether it has a
-  usable launch link.
+  An inbox entry describes whether it has a usable launch link. A member can
+  separately opt into original sharing with `worker support configure` using
+  their own Buffer destination and public text template. Use `worker support
+  destinations` to read eligible connected channels; do not guess IDs, choose
+  a destination, supply consent or configure sharing on behalf of a member.
+  Only explicit requests to share with an exact link can trigger a post. Use
+  one worker per destination because receipts and duplicate checks are local.
+  `worker support pause` and collect mode stop new submissions. Buffer may still
+  publish posts it has already accepted. Treat a post as sent after verified
+  provider readback.
 
 ## Expected Agent Plan Shape
 

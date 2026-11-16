@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto'
 import { githubRequest,githubJson } from './github-api.mjs'
 import { parseGithubIssue,githubIssue,githubIssueReaction } from './github-issues.mjs'
 import {producthuntUser,producthuntFollow,validProducthuntUsername,validProducthuntId} from './producthunt.mjs'
+import {validateSupportSharing} from './support-actions.mjs'
 
-export const defaultPolicy = { version:1, mode:'draft', maxExternalPerDay:5, githubRepositories:[], githubUsers:[],githubIssues:[],githubMemberActions:[],producthuntUsers:[] }
+export const defaultPolicy = { version:1, mode:'draft', maxExternalPerDay:5, githubRepositories:[], githubUsers:[],githubIssues:[],githubMemberActions:[],producthuntUsers:[],supportSharing:{enabled:false} }
 const validGithubUser = value => typeof value==='string' && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(value) && !value.includes('--')
 export function validatePolicy(input) {
   if (input.version !== 1 || !['collect','draft','execute'].includes(input.mode) ||
@@ -19,7 +20,8 @@ export function validatePolicy(input) {
   if(!Array.isArray(memberActions)||memberActions.length>2||new Set(memberActions).size!==memberActions.length||memberActions.some(kind=>!['star','follow'].includes(kind)))throw new Error('Invalid GitHub member action scope')
   const producthuntUsers=input.producthuntUsers??[]
   if(!Array.isArray(producthuntUsers)||producthuntUsers.length>100||producthuntUsers.some(user=>!validProducthuntUsername(user)))throw new Error('Invalid Product Hunt user allowlist')
-  return {...input, githubRepositories:input.githubRepositories.map(repo=>repo.toLowerCase()),githubUsers:users.map(user=>user.toLowerCase()),githubIssues:issues.map(issue=>parseGithubIssue(issue).issue),githubMemberActions:memberActions,producthuntUsers:producthuntUsers.map(user=>user.toLowerCase())}
+  return {...input, githubRepositories:input.githubRepositories.map(repo=>repo.toLowerCase()),githubUsers:users.map(user=>user.toLowerCase()),githubIssues:issues.map(issue=>parseGithubIssue(issue).issue),githubMemberActions:memberActions,producthuntUsers:producthuntUsers.map(user=>user.toLowerCase()),
+    supportSharing:validateSupportSharing(input.supportSharing)}
 }
 const digest = value => createHash('sha256').update(value).digest('hex')
 export function supportBrief(job) {

@@ -1,5 +1,7 @@
 # 0.5.3
 
+- Add opt-in publishing to a member's verified Buffer channel for explicit launch sharing requests. Use the member's public message template and exact launch link, honor collect mode and the daily action limit, and report verified sends and pending or uncertain submissions.
+
 - Collect recent Slack launch requests automatically during existing community feed checks. Add an account-bound `worker support` inbox, explicit missing-link states, and a one-time seven-day catch-up without changing polling intervals or performing external actions.
 - Keep launch requests separate from completed actions and replace fixed Peerlist rating instructions with independent review guidance.
 - Add account-bound Herd campaign commands for recommendations, original campaign submissions, preferences, cancellation and recorded results. Reuse the website's browser sign-in and stable request IDs; never retry uncertain writes automatically.

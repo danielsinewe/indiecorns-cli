@@ -40,6 +40,8 @@ import {storageSettings,directoryBytes} from "../lib/storage.mjs"
 import {credentialRevision} from "../lib/auth-context.mjs"
 import {runCampaign} from "../lib/campaigns.mjs"
 import {supportInboxReport} from "../lib/support-inbox.mjs"
+import {listBufferDestinations,runSupportShares,supportSharingStatus,validateSupportSharing} from "../lib/support-actions.mjs"
+import {readSupportSettings} from "../lib/support-settings.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -151,6 +153,9 @@ Commands:
   worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
   worker support                 Read launch requests from your community inbox
+  worker support destinations    List connected publishing channels
+  worker support configure       Enable automatic sharing from --file or --stdin
+  worker support pause           Stop automatic sharing
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
   worker discovery status        Inspect post sources, delivery and reader requirements
   worker discovery agent         Get the bundled reader for your active agent session
@@ -5162,12 +5167,16 @@ const workerSupportContext = (flags, headers = getCliAuthHeaders()) => {
   }
 }
 
-const workerSupport = (flags, { directory = join(configDir, "worker"), inbox, platform, includeRequests = true } = {}) => {
+const workerSupportReadContext = (flags, directory) => {
   const mode = workerSlackMode(directory)
   const sourceAvailable = usesCommunitySlack(
     mode, mode === "community" ? null : credential(directory, "slack"), existsSync(join(directory, "slack-evidence.json"))
   )
-  return supportInboxReport(inbox, { ...workerSupportContext(flags), sourceAvailable, platform, includeRequests })
+  return { ...workerSupportContext(flags), sourceAvailable }
+}
+
+const workerSupport = (flags, { directory = join(configDir, "worker"), inbox, platform, includeRequests = true } = {}) => {
+  return supportInboxReport(inbox, { ...workerSupportReadContext(flags, directory), platform, includeRequests })
 }
 
 const isMonday = (date = new Date()) => date.getDay() === 1
@@ -6774,6 +6783,15 @@ const main = async () => {
       })).digest("hex")
       const policyPath = join(directory, "policy.json")
       const readPolicy = () => existsSync(policyPath) ? validatePolicy(JSON.parse(readFileSync(policyPath, "utf8"))) : defaultPolicy
+      const sharingRevision = () => {
+        const { headers, originMatches, expectedActorId } = workerSupportContext(flags)
+        // A saved machine session must have a pinned account, not just an email.
+        if (!headers || !originMatches || (!expectedActorId && !process.env.INDIECORNS_TOKEN?.trim())) return undefined
+        return accountRevision()
+      }
+      const sharingReport = (state, includeReceipts = false) => supportSharingStatus(state ?? {}, {
+        policy: readPolicy(), accountRevision: sharingRevision(), includeReceipts,
+      })
       if(args[0]==="storage") {
         if(Object.hasOwn(flags,"max-mib")) {
           const mib=Number(flags["max-mib"])
@@ -6914,7 +6932,10 @@ const main = async () => {
           mkdirSync(directory, {recursive:true,mode:0o700})
           saveState(policyPath,policy)
         }
-        printJson(readPolicy())
+        const {supportSharing,...otherPolicy} = readPolicy()
+        printJson({...otherPolicy,
+          ...(supportSharing?.enabled && supportSharing.accountRevision===sharingRevision() ? {supportSharing} : {}),
+        })
         return 0
       }
       if (args[0] === "briefs") {
@@ -6998,20 +7019,77 @@ const main = async () => {
         return 0
       }
       if (args[0] === "support") {
+        const subcommand = args[1]
         const allowed = new Set(["agent", "app-url", "json", "no-open", "no-telemetry"])
-        if (args.length !== 1 || Object.keys(flags).some(flag => !allowed.has(flag))) {
-          throw new Error("Use worker support --json with the signed-in CLI account")
+        if (subcommand === "configure") {
+          allowed.add("file")
+          allowed.add("stdin")
+        }
+        if (args.length > 2 || (subcommand && !["configure","pause","destinations"].includes(subcommand)) ||
+            Object.keys(flags).some(flag => !allowed.has(flag))) {
+          throw new Error("Use worker support, destinations, configure --file <path>|--stdin, or pause.")
+        }
+        if (subcommand === "destinations" || subcommand === "configure") {
+          const revision = sharingRevision()
+          if (!revision) throw new Error("Sign in to this Indiecorns app with the account you want to use for automatic sharing.")
+          const token = credential(directory, "buffer")
+          if (!token) throw new Error("Connect your Buffer API key using worker credentials --provider buffer --token-stdin.")
+          const raw = subcommand === "configure" ? await readSupportSettings(flags) : null
+          const rule = raw ? validateSupportSharing({ ...raw, accountRevision: revision, enabledAt: Date.now() }) : null
+          const before = readPolicy().supportSharing
+          const destinations = await listBufferDestinations({token})
+          if (revision !== sharingRevision() || token !== credential(directory, "buffer")) {
+            throw new Error("Your Indiecorns or Buffer connection changed. Run the command again.")
+          }
+          if (!rule) {
+            printJson(destinations)
+            return 0
+          }
+          if (destinations.accountId !== rule.accountId ||
+              !destinations.destinations.some(destination => destination.organizationId === rule.organizationId &&
+                destination.channelId === rule.channelId && destination.serviceId === rule.serviceId)) {
+            throw new Error("The selected Buffer channel is not available to the connected account.")
+          }
+          const policy = readPolicy()
+          if (JSON.stringify(policy.supportSharing) !== JSON.stringify(before)) {
+            throw new Error("Sharing settings changed while the channel was being checked. Run the command again.")
+          }
+          mkdirSync(directory, {recursive:true,mode:0o700})
+          saveState(policyPath, validatePolicy({...policy, supportSharing:{...rule,enabledAt:Date.now()}}))
+          printJson(sharingReport(workerStatus(directory).state))
+          return 0
+        }
+        if (subcommand === "pause") {
+          const revision = sharingRevision()
+          const policy = readPolicy()
+          if (policy.supportSharing?.enabled && (!revision || revision !== policy.supportSharing.accountRevision)) {
+            throw new Error("Sign in to the Indiecorns account that enabled sharing before pausing it.")
+          }
+          if (policy.supportSharing?.enabled) {
+            const {supportSharing, ...otherPolicy} = policy
+            saveState(policyPath, otherPolicy)
+          }
+          printJson(sharingReport(workerStatus(directory).state))
+          return 0
         }
         const { state } = workerStatus(directory)
-        printJson(workerSupport(flags, { directory, inbox: state?.supportInbox }))
+        const sharing = sharingReport(state, true)
+        printJson({ ...workerSupport(flags, { directory, inbox: state?.supportInbox }),
+          automaticExternalActions: sharing.enabled && sharing.status !== "paused_by_collect_mode", sharing })
         return 0
       }
       if (args[0] === "status") {
         const status = workerStatus(directory)
         const inbox = status.state?.supportInbox
-        if (status.state) delete status.state.supportInbox
+        const sharing = sharingReport(status.state)
+        if (status.state) {
+          delete status.state.supportInbox
+          delete status.state.supportShares
+          delete status.state.supportSharingHealth
+        }
         if (status.state?.communityFeed) delete status.state.communityFeed.supportCatchup
-        printJson({ ...status, support: workerSupport(flags, { directory, inbox, includeRequests: false }) })
+        printJson({ ...status, support: {...workerSupport(flags, { directory, inbox, includeRequests: false }),
+          automaticExternalActions: sharing.enabled && sharing.status !== "paused_by_collect_mode", sharing} })
         return 0
       }
       if (args[0] === "health") {
@@ -7052,7 +7130,29 @@ const main = async () => {
           },
           deriveTargets: memberCandidates,
           derivationRevision: "member-profile-repos-v3-issues",
-          act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), producthuntToken:credential(directory,"producthunt"), accountRevision:accountRevision()}),
+          act: async (state, signal, checkpoint) => {
+            const policy = readPolicy()
+            await runActions({state, policy, memberSnapshot, signal, checkpoint, token:credential(directory, "github"), producthuntToken:credential(directory,"producthunt"), accountRevision:accountRevision()})
+            const sharingPolicy = readPolicy()
+            if (!sharingPolicy.supportSharing?.enabled) return
+            const revision = sharingRevision()
+            const token = credential(directory, "buffer")
+            const inboxContext = workerSupportReadContext(flags, directory)
+            await runSupportShares({state, policy:sharingPolicy, accountRevision:revision, token, signal, checkpoint, inboxContext,
+              authorize: ({rule, requestId, targetUrl, scopedBinding}) => {
+                try {
+                  const currentPolicy = readPolicy()
+                  const currentInbox = workerSupport(flags,{directory,inbox:state.supportInbox})
+                  return Boolean(revision && sharingRevision() === revision && credential(directory,"buffer") === token &&
+                    currentPolicy.mode !== "collect" && currentPolicy.maxExternalPerDay === sharingPolicy.maxExternalPerDay &&
+                    JSON.stringify(currentPolicy.supportSharing) === JSON.stringify(rule) &&
+                    state.supportInbox?.scopedBinding === scopedBinding && state.slackSource === "community_feed" &&
+                    state.communityFeed?.health === "ok" && currentInbox.status === "ready" &&
+                    currentInbox.requests.some(request => request.id === requestId && request.targetUrl === targetUrl))
+                } catch { return false }
+              },
+            })
+          },
           onCycle: printJson,
         })
         return state.lastError ? 1 : 0
@@ -7422,7 +7522,7 @@ const telemetryFlags = parsedForTelemetry.flags
 const telemetryArgs = parsedForTelemetry.args
 const shouldTrackCommand = !["telemetry", "analytics", "campaign"].includes(
   telemetryCommand
-)
+) && !(telemetryCommand === "worker" && ["support","credentials"].includes(telemetryArgs[0]))
 
 Promise.resolve(
   shouldTrackCommand

@@ -145,9 +145,8 @@ targets and matching `record` commands without opening browser tabs.
 
 The background worker automatically reads launch requests through the
 Indiecorns community feed. Use `worker support --json` for the current account's
-inbox. The inbox shows when an exact launch link is missing. Linked launches are available for
-independent review and first-hand feedback. The inbox never performs an
-external action.
+inbox. It shows when an exact launch link is missing and reports automatic
+sharing separately from requests.
 
 After upgrading, the existing feed polling schedule catches up on the last seven
 days of requests once. The inbox retains at most 200 recent requests, expires
@@ -156,6 +155,53 @@ be verified. Existing polling intervals, action queues, and receipts are preserv
 
 `peerlist-launches --agent` lists known Peerlist launches separately for
 independent review without opening a browser.
+
+### Automatic launch sharing
+
+Automatic sharing is off until a member enables it from their own signed-in
+CLI. Connect a Buffer API key and list the eligible destinations:
+
+```bash
+indiecorns worker credentials --provider buffer --token-stdin < /secure/path/buffer-token
+indiecorns worker support destinations --json
+```
+
+Copy the returned account and destination IDs into a settings file. Choose which
+launch platforms to share and write the public message in your own words:
+
+```json
+{
+  "enabled": true,
+  "provider": "buffer",
+  "accountId": "<Buffer account ID>",
+  "organizationId": "<Buffer organization ID>",
+  "channelId": "<Buffer channel ID>",
+  "serviceId": "<connected social account ID>",
+  "platforms": ["peerlist", "producthunt"],
+  "textTemplate": "A launch from the Indiecorns community: {url}"
+}
+```
+
+```bash
+indiecorns worker support configure --file sharing.json
+indiecorns worker support --json
+indiecorns worker support pause
+```
+
+The worker submits a new post when a current member explicitly asks for sharing
+and supplies the exact public launch link. It inserts that link into the
+template, waits at least an hour between shares, and uses the existing daily
+action limit. A request to vote alone or an instruction against sharing does
+not trigger a post. Only requests made after you enable sharing are eligible.
+
+The CLI reports sent posts, pending provider results, failures and uncertain
+submissions. Use one worker per destination because receipts and duplicate
+checks are local to each worker. `worker support pause` and collect mode stop
+new submissions. Posts already sent to Buffer may still publish.
+
+Sharing settings belong to the signed-in member and exact Buffer destination.
+They do not enable voting, ratings, likes, comments, native reposts, or any
+other worker actions. The CLI does not copy Slack message text into a post.
 
 ## External Profiles
 
