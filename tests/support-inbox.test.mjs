@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import test from "node:test"
 import { syncCommunityFeed } from "../indiecorns/lib/community-feed.mjs"
 import { supportInboxReport } from "../indiecorns/lib/support-inbox.mjs"
@@ -256,7 +256,7 @@ test("real CLI worker consumes launch requests without social calls and status h
     INDIECORNS_SLACK_TOKEN: "", INDIECORNS_GITHUB_TOKEN: "", INDIECORNS_PRODUCTHUNT_TOKEN: "",
   }
   const run = (...args) => {
-    const result = spawnSync(process.execPath, ["--import", stub, cli, ...args, "--json", "--no-telemetry"], {
+    const result = spawnSync(process.execPath, ["--import", pathToFileURL(stub).href, cli, ...args, "--json", "--no-telemetry"], {
       env: environment, encoding: "utf8", timeout: 20000,
     })
     assert.equal(result.status, 0, result.stderr)
