@@ -29,6 +29,7 @@ import { scrapeTarget, memberCandidates } from "../lib/scraper.mjs"
 import { prepareServiceRuntime, pruneManagedRuntimes } from "../lib/runtime.mjs"
 import { manageService } from "../lib/service.mjs"
 import { runWorker, workerStatus, enqueue, saveState } from "../lib/worker.mjs"
+import { mentionView, mentionsText, unannouncedMentions } from "../lib/mentions.mjs"
 import { syncCommunityFeed } from "../lib/community-feed.mjs"
 import { assertWorkerRuntime } from "../lib/worker-lock.mjs"
 import { readHealthReport } from "../lib/health.mjs"
@@ -142,6 +143,7 @@ Commands:
   worker setup --json            Machine-readable result (--ndjson for events)
   worker storage [--max-mib N]   Inspect bounded storage; explicitly set 16–512 MiB
   worker status                  Inspect persisted worker queue and health
+  worker mentions [--json]        Read saved Slack @indiecorns notifications
   worker health [--hours 24]     Inspect bounded heartbeat and progress history
   worker discovery status        Inspect post sources, delivery and reader requirements
   worker discovery agent         Get the bundled reader for your active agent session
@@ -6647,13 +6649,14 @@ const main = async () => {
         const localToken = mode === "community" ? null : credential(directory, "slack")
         const useCommunity = mode === "community" || (mode === "auto" && (!localToken || !snapshot))
         const token = useCommunity ? null : localToken
-        if (useCommunity) {
+        if (useCommunity || getCliAuthHeaders()) {
           const headers=getCliAuthHeaders()
           const proof=workerEvidenceHeader(directory,{headers,version:getCliVersion()})
-          snapshot = await syncCommunityFeed({state,signal,checkpoint,appUrl:getAppUrl(flags),
+          const communitySnapshot = await syncCommunityFeed({state,signal,checkpoint,appUrl:getAppUrl(flags),enqueueTargets:useCommunity,
             endpoint:getCliEndpoint("/api/public/cli/worker-feed","/api/community/worker-feed"),headers:proof?{...headers,"x-indiecorns-worker-evidence":proof}:headers,headerAliases:workerHeaderAliases()})
-          state.slackSource = "community_feed"
-        } else state.slackSource = "local_slack"
+          if(useCommunity)snapshot=communitySnapshot
+        }
+        state.slackSource = useCommunity ? "community_feed" : "local_slack"
         if (snapshot && token && (state.slackNextRefreshAt ?? 0) <= Date.now()) {
           try {
             snapshot = await refreshSlackEvidence({snapshot,token,signal})
@@ -6693,7 +6696,7 @@ const main = async () => {
         memberSnapshot = snapshot
         state.priorityNextPollAt = token && snapshot ? Math.min(state.slackNextRefreshAt ?? Date.now(),
           snapshot.expiresAt > Date.now() ? state.slackHistory?.nextPollAt ?? Infinity : Infinity) : useCommunity ? state.communityFeed?.nextPollAt : undefined
-        state.priorityNextPollAt=Math.min(state.priorityNextPollAt??Infinity,state.githubMemberPosts?.nextPollAt??Infinity)
+        state.priorityNextPollAt=Math.min(state.priorityNextPollAt??Infinity,state.githubMemberPosts?.nextPollAt??Infinity,(useCommunity?state.communityFeed:state.communityMentionFeed)?.nextPollAt??Infinity)
       }
       if (args[0] === "slack") {
         if (args[1] === "source") {
@@ -6952,8 +6955,27 @@ const main = async () => {
         } else printJson(await discoveryApi({appUrl:getAppUrl(flags),headers:getCliAuthHeaders(),body}))
         return 0
       }
+      const currentMentions = state => mentionView(state, {
+        appUrl: getAppUrl(flags), headers: getCliAuthHeaders(),
+      })
+      if (args[0] === "mentions") {
+        const view = currentMentions(workerStatus(directory).state)
+        if (flags.ndjson) printNdjson(view)
+        else if (flags.json || flags.agent) printJson(view)
+        else console.log(mentionsText(view))
+        return 0
+      }
       if (args[0] === "status") {
-        printJson(workerStatus(directory))
+        const report = workerStatus(directory)
+        const view = currentMentions(report.state)
+        if (report.state) delete report.state.mentions
+        printJson({
+          ...report,
+          mentions: {
+            status: view.status, count: view.items.length,
+            nextCommand: "indiecorns worker mentions",
+          },
+        })
         return 0
       }
       if (args[0] === "health") {
@@ -6995,7 +7017,31 @@ const main = async () => {
           deriveTargets: memberCandidates,
           derivationRevision: "member-profile-repos-v3-issues",
           act: (state, signal, checkpoint) => runActions({state, policy:readPolicy(), memberSnapshot, signal, checkpoint, token:credential(directory, "github"), producthuntToken:credential(directory,"producthunt"), accountRevision:accountRevision()}),
-          onCycle: printJson,
+          onCycle: (cycle, workerState) => {
+            const view = currentMentions(workerState)
+            const received = unannouncedMentions(workerState, view)
+            const structured = flags.json || flags.agent
+            const summary = {
+              ...cycle,
+              mentions: {
+                status: view.status, count: view.items.length,
+                nextCommand: "indiecorns worker mentions",
+                ...(structured && !flags.ndjson ? { items: received } : {}),
+              },
+            }
+            if (received.length) {
+              if (flags.ndjson) printNdjson({ type: "worker.mentions", items: received })
+              else if (!structured) console.log(mentionsText({ ...view, items: received }))
+            }
+            if (flags.ndjson) printNdjson(summary)
+            else printJson(summary)
+            // Commit only after output succeeds. A crash before this checkpoint
+            // can repeat a notice, but cannot silently discard an unseen notice.
+            if (received.length) {
+              workerState.mentions.announcedCursor = received.at(-1).id
+              saveState(join(directory, "state.json"), workerState)
+            }
+          },
         })
         return state.lastError ? 1 : 0
       } finally {

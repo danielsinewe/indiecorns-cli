@@ -78,7 +78,7 @@ async function setup({directory,appUrl,headers,accountRevision,mode='draft',chec
   const retryUntil=now()+(check?0:retryForMs)
   let snapshot
   for(let attempt=0;attempt<32;attempt++) {
-    snapshot=await syncCommunityFeed({state:probe,appUrl,headers,request,now,
+    snapshot=await syncCommunityFeed({state:probe,appUrl,headers,request,now,mentions:false,
       endpoint:headers.Authorization?'/api/public/cli/worker-feed':'/api/community/worker-feed'})
     if(probe.communityFeed?.health==='ok'||probe.communityFeed?.health==='auth_required')break
     const delay=Math.max(1000,(probe.communityFeed?.nextPollAt??now()+60000)-now())

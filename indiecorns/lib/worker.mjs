@@ -215,7 +215,7 @@ export async function runWorker({ directory, discover, once = false, intervalMs 
       }
       health.progress('cycle')
       onCycle({ pending: state.pending.length + Object.keys(state.backlog).length, loaded:state.pending.length,
-        backlog:Object.keys(state.backlog).length, lastError: state.lastError, nextPollAt: state.nextPollAt })
+        backlog:Object.keys(state.backlog).length, lastError: state.lastError, nextPollAt: state.nextPollAt }, state)
       if (once) return state
       const dueObservations = observe && state.lastError !== 'auth_required'
         ? [...Object.values(state.jobs).filter(job => job.status === 'queued').map(job => job.nextObserveAt ?? now()),...backlogSchedule(state)] : []

@@ -1,3 +1,7 @@
+# 0.5.4
+
+- Receive community Slack `@indiecorns` broadcasts in the normal worker stream and `worker mentions [--json]`, with bounded offline catch-up, restart-safe deduplication and account-scoped private storage. One-shot JSON includes new notices in one cycle object; announcement cursors prevent restart replays. Confirmed membership loss clears the inbox. Status shows a notification count without message bodies; setup probes skip the inbox.
+
 # 0.5.2
 
 - Wait for rendered X and LinkedIn timelines before classifying source availability. Keep the wait bounded and preserve login requirements, author matching and temporary-tab cleanup.
