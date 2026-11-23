@@ -648,3 +648,20 @@ browser must have the required session. This consumes the host subscription's
 execution capacity; it does not make a paid model API call from the CLI. Native
 schedules can be managed in the host app. Enabling a schedule or recording one
 run is not proof of 24-hour coverage or other members' installations.
+
+### Slack broadcast notifications
+
+Normal connected workers automatically pick up top-level and thread `@indiecorns`
+broadcasts from the configured community channel. New notices appear in the worker
+stream with safe plain text and a Slack link; `indiecorns worker mentions` reads the
+local inbox (`--json` for agents). Status includes only a count and the inbox command.
+
+The inbox catches up after offline time through the existing community feed poll,
+retains at most seven days and 200 notices, and deduplicates by notification ID across
+restarts. The worker saves its announcement cursor after printing, so later worker
+starts do not replay already announced notices. It is bound to the community
+origin, credential and confirmed member.
+Reading saved text requires fresh membership evidence; temporary outages, expired
+evidence and older servers show an availability status until the next successful
+poll. Confirmed membership loss clears saved messages and cursors. Local/custom Slack discovery still receives these community notifications.
+Setup checks do not consume the inbox. Notifications never execute social actions.

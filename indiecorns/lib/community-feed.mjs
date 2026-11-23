@@ -5,22 +5,31 @@ import {enqueue} from './worker.mjs'
 import {credentialContext} from './auth-context.mjs'
 import {safeDiscoveryError} from './discovery-errors.mjs'
 import {sourceRetryDelay} from './network-recovery.mjs'
+import { prepareMentions, ingestMentions } from './mentions.mjs'
 
 // Community authentication authorizes this feed. Provider credentials remain on
 // the community server; clients retain only membership proof and link jobs.
 export async function syncCommunityFeed({state,appUrl,endpoint='/api/community/worker-feed',headers,
-  signal,request=fetch,now=Date.now,checkpoint=()=>{},headerAliases=[]}) {
+  signal,request=fetch,now=Date.now,checkpoint=()=>{},headerAliases=[],mentions=true,enqueueTargets=true}) {
   const url=new URL(endpoint,appUrl)
   if(url.origin!==new URL(appUrl).origin)throw new Error('Invalid community feed origin')
   const binding=createHash('sha256').update(JSON.stringify([url.href,credentialContext(headers)])).digest('hex')
+  // Keep a custom Slack source's inbox-only poll from consuming community target cursors.
+  const feedKey = enqueueTargets ? 'communityFeed' : 'communityMentionFeed'
   const legacy=[headers,...headerAliases].map(h=>createHash('sha256').update(JSON.stringify([url.href,h])).digest('hex'))
-  if(legacy.includes(state.communityFeed?.binding))state.communityFeed.binding=binding
-  if(state.communityFeed?.binding!==binding)state.communityFeed={binding,cursor:'',oldest:'0',latest:'0.000000',nextPollAt:0}
-  const feed=state.communityFeed
+  if(legacy.includes(state[feedKey]?.binding))state[feedKey].binding=binding
+  if(state[feedKey]?.binding!==binding)state[feedKey]={binding,cursor:'',oldest:'0',latest:'0.000000',nextPollAt:0}
+  const inbox = mentions ? prepareMentions(state, appUrl, headers, now()) : null
+  const feed=state[feedKey]
   if(feed.nextPollAt>now())return feed.snapshot??null
   feed.nextPollAt=now()+60000
   checkpoint()
   if(!headers){feed.health='auth_required';state.lastError='auth_required';checkpoint();return null}
+  if (inbox) {
+    url.searchParams.set('mentions', '1')
+    url.searchParams.set('mentionAfter', inbox.cursor)
+    if (!enqueueTargets) url.searchParams.set('mentionsOnly', '1')
+  }
   url.searchParams.set('oldest',feed.oldest)
   if(feed.cursor)url.searchParams.set('cursor',feed.cursor)
   try {
@@ -49,19 +58,22 @@ export async function syncCommunityFeed({state,appUrl,endpoint='/api/community/w
     if(body.cursor && (body.cursor===feed.cursor || recent.includes(body.cursor)))throw Object.assign(new Error('Repeated community feed cursor'),{code:'invalid_feed'})
     // Ingestion and cursor movement share one state checkpoint. A crash before
     // that commit can repeat a read but cannot skip a page of targets.
-    enqueue(state,body.targets,now())
+    if (enqueueTargets) enqueue(state, body.targets, now())
+    if (inbox) ingestMentions(state, body.mentions, { now: now(), snapshot })
     const latest=BigInt(body.latest.replace('.',''))>BigInt(feed.latest.replace('.',''))?body.latest:feed.latest
     feed.recent=body.cursor?[...recent,...(feed.cursor?[feed.cursor]:[])].slice(-64):[]
     feed.snapshot=snapshot
     feed.latest=latest
     feed.cursor=body.cursor
     if(!feed.cursor)feed.oldest=latest
-    feed.nextPollAt=now()+(feed.cursor?60000:300000)
+    const catchingUp = feed.cursor || inbox?.hasMore || inbox?.status === 'pending'
+    feed.nextPollAt = now() + (catchingUp ? 60000 : 300000)
     feed.health='ok'
     delete feed.httpStatus
     delete feed.error
     checkpoint()
   } catch(error) {
+    if (inbox) inbox.status = 'unavailable'
     feed.health=['auth_required','rate_limited','feed_unavailable','invalid_feed','cursor_reset'].includes(error.code)?error.code:'feed_unavailable'
     feed.error={...safeDiscoveryError(error),...(feed.httpStatus?{httpStatus:feed.httpStatus}:{}),at:now()}
     feed.nextPollAt=now()+Math.max(60000,sourceRetryDelay(error))
